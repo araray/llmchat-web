@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llmchat-web"
-version = "0.2.1" # Version for llmchat-web
+version = "0.2.2" # Version for llmchat-web
 description = "A Flask-based web interface for LLMCore, providing chat and RAG functionalities."
 readme = "README.md" # Assuming llmchat-web will have its own README
 requires-python = ">=3.11"
@@ -83,12 +83,12 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
-disallow_untyped_defs = False # Start less strict for web projects
-check_untyped_defs = True
+disallow_untyped_defs = false # Start less strict for web projects
+check_untyped_defs = true
 
 [[tool.mypy.overrides]]
 module = "llmchat_web.*" # Corrected module path
-disallow_untyped_defs = True # Enforce types within llmchat_web code
+disallow_untyped_defs = true # Enforce types within llmchat_web code
 
 # [[tool.mypy.overrides]]
 # module = "llmchat_web.tests.*" # Corrected module path for tests
