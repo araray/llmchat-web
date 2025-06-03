@@ -8,6 +8,15 @@ The main_bp Blueprint is now defined here to avoid circular imports.
 LLMCore initialization is now attempted at module load time to support
 Gunicorn workers, in addition to being called by external startup mechanisms
 or direct script execution.
+
+SECRET_KEY Fallback Strategy:
+To ensure session consistency across Gunicorn workers when FLASK_SECRET_KEY
+environment variable is not set, a fallback secret key is generated once
+when this module is first loaded (_generated_flask_secret_key_at_module_load).
+All workers forked from the same Gunicorn master process will share this
+fallback key, preventing session decryption issues. For production,
+explicitly setting the FLASK_SECRET_KEY environment variable is still
+the recommended best practice.
 """
 
 # --- Start: Fix for direct script execution and relative imports ---
@@ -57,7 +66,7 @@ try:
     APP_VERSION = version("llmchat-web")
 except PackageNotFoundError:
     # Fallback version if llmchat-web is not installed (e.g., running source directly)
-    APP_VERSION = "0.2.3-dev" # Ensure this matches the intended version in pyproject.toml
+    APP_VERSION = "0.2.6-dev" # Ensure this matches the intended version in pyproject.toml
     logging.getLogger("llmchat_web_startup").info(
         f"llmchat-web package not found (or not installed), using fallback version: {APP_VERSION}. "
         "This is normal if running directly from source without installation."
@@ -78,17 +87,32 @@ logging.basicConfig(
 logger = logging.getLogger("llmchat_web") # Main web app logger
 logger.setLevel(logging.DEBUG) # Keep debug for web development, can be configured
 
+
 # --- Flask App Initialization ---
 app = Flask(__name__)
 
 # Define the main Blueprint here to be imported by routes.py
 main_bp = Blueprint('main_bp', __name__)
 
+# --- Generate Flask SECRET_KEY fallback once at module load ---
+# This ensures all Gunicorn workers share the same fallback key if
+# FLASK_SECRET_KEY environment variable is not set.
+_generated_flask_secret_key_at_module_load = secrets.token_hex(32)
+logger.info(f"Flask SECRET_KEY fallback generated at module load. For production, set FLASK_SECRET_KEY env var.")
+
 
 # --- Flask Configuration ---
-app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
+# Use the pre-generated key if FLASK_SECRET_KEY env var is not set
+app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", _generated_flask_secret_key_at_module_load)
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_ENV") == "production"
+if os.environ.get("FLASK_SECRET_KEY"):
+    logger.info("Using FLASK_SECRET_KEY environment variable for Flask session encryption.")
+else:
+    logger.warning("FLASK_SECRET_KEY environment variable not set. Using a randomly generated fallback key for Flask sessions. "
+                   "This key will be consistent for all workers of this Gunicorn master process instance, "
+                   "but will change on application restart if the env var remains unset. "
+                   "Set FLASK_SECRET_KEY in your environment for stable production sessions.")
 
 
 # --- LLMCore Initialization (Asynchronous) ---
