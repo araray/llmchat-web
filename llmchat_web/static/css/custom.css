@@ -1,0 +1,41 @@
+/* llmchat_web/static/css/custom.css */
+
+/*
+    This file will contain custom CSS styles for the llmchat-web application.
+    It complements Bootstrap 5 and is used to achieve the specific look and feel,
+    such as the dark theme, panel sizing, and other visual refinements.
+
+    For the initial mockup, most specific styles were embedded directly in
+    the <style> block of index.html. As the project progresses, those styles
+    can be moved here and organized.
+*/
+
+/* Example: General body styling (if not already in index.html's <style> block or if overriding) */
+body {
+    font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+        Arial, sans-serif;
+    /* Styles for dark theme are primarily in index.html for now */
+}
+
+/* Placeholder for future styles */
+/*
+.top-bar { ... }
+.left-sidebar { ... }
+.main-content-area { ... }
+.chat-messages { ... }
+.message-bubble { ... }
+.user-message { ... }
+.agent-message { ... }
+.bottom-control-bar { ... }
+*/
+
+/* Ensure icons are vertically aligned with text if needed */
+.fas,
+.far,
+.fab {
+    /* Font Awesome classes */
+    vertical-align: -0.125em; /* Adjust as needed */
+}
+
+/* Add any global custom styles or overrides here */

@@ -1,0 +1,132 @@
+[build-system]
+requires = ["setuptools>=70.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llmchat-web"
+version = "0.2.0"
+description = "A powerful and flexible command-line interface for interacting with various Large Language Model (LLM) providers, powered by LLMCore."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Araray Velho", email = "araray@gmail.com" }
+]
+keywords = ["llm", "ai", "chat", "cli", "repl", "llmcore", "rag", "openai", "anthropic", "ollama", "gemini"]
+classifiers = [
+    "Development Status :: 4 - Beta", # Updated status
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Utilities",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+]
+
+# Core dependencies for llmchat
+dependencies = [
+    "llmcore >= 0.18.0", # Core backend library
+    "llmchat >= 0.19.0", # Core backend library
+    "Flask>=3.1.0",
+    "python-daemon>=3.1.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/araray/llmchat-web"
+Repository = "https://github.com/araray/llmchat-web"
+ Documentation = "https://github.com/araray/llmchat-web"
+Issues = "https://github.com/araray/llmchat-web/issues"
+
+# Defines the console script for the llmchat command
+[project.scripts]
+llmchat = "llmchat.main:main_cli_entry"
+
+# --- Setuptools specific configuration ---
+[tool.setuptools.packages.find]
+# Tells setuptools to find packages in the current directory ('.')
+# and include any package starting with 'llmchat'.
+# This is suitable if your 'llmchat' package directory is at the root.
+where = ["."]
+include = ["llmchat*"]
+# exclude = ["llmchat.tests*"] # Example: if you don't want to install tests
+
+# If llmchat still needs to package its own data files (e.g., old default_config.toml if kept for some reason)
+# [tool.setuptools.package_data]
+# llmchat = ["config/*.toml"] # Example: include TOML files in llmchat/config
+
+# --- Ruff Linter & Formatter Configuration (Example) ---
+[tool.ruff]
+line-length = 100
+indent-width = 4
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "C",  # flake8-comprehensions
+    "B",  # flake8-bugbear
+    "A",  # flake8-builtins
+    "RUF", # Ruff-specific rules
+    "ASYNC", # flake8-async
+    "PT", # flake8-pytest-style
+]
+ignore = [
+    "E501", # Line too long (handled by formatter)
+    "B008", # Do not perform function calls in argument defaults (sometimes ok in Click)
+    "C901", # Function too complex (good to watch, but can be ignored selectively)
+]
+# Allow unused arguments in specific methods if needed (e.g. for Click context objects)
+# dummy-variable-rgx = "^(_|dummy_)"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+# --- MyPy Type Checker Configuration (Example) ---
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true # Start with true, make stricter later if possible
+disallow_untyped_defs = false # Start with false, enable for stricter checking
+check_untyped_defs = true
+
+# Example: more specific settings for your package code
+[[tool.mypy.overrides]]
+module = "llmchat.*"
+disallow_untyped_defs = true # Enforce types within your own code
+
+# Example: less strict for tests
+[[tool.mypy.overrides]]
+module = "llmchat.tests.*"
+disallow_untyped_defs = false
+
+# --- Pytest Configuration (Example) ---
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --cov=llmchat --cov-report=term-missing --cov-report=xml"
+testpaths = [
+    "tests", # Assuming your tests are in a 'tests' directory at the root
+]
+asyncio_mode = "auto" # For pytest-asyncio
+
+# --- Coverage Configuration (Example) ---
+[tool.coverage.run]
+source = ["llmchat"] # Measure coverage for the llmchat package
+omit = [
+    "llmchat/cli/*", # Example: if CLI command files are hard to unit test fully
+    "llmchat/main.py", # Often, the main entry has less logic to test directly
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80 # coverage target

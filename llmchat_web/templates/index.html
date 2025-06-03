@@ -1,0 +1,1508 @@
+{% extends "layout.html" %} {% block title %}LLMChat Web REPL{% endblock %} {%
+block head_extra %}
+<style>
+    /* Custom styles for llmchat-web layout */
+    body {
+        background-color: #212529; /* Dark background for the whole page */
+        color: #dee2e6; /* Light text color */
+        overflow-x: hidden; /* Prevent horizontal scroll */
+    }
+
+    #app-container {
+        display: flex;
+        flex-direction: column;
+        height: 100vh; /* Full viewport height */
+    }
+
+    /* Top Bar */
+    .top-bar {
+        background-color: #343a40; /* Slightly lighter dark for top bar */
+        padding: 0.5rem 1rem;
+        color: #f8f9fa;
+        flex-shrink: 0; /* Prevent top bar from shrinking */
+        font-size: 0.85rem;
+    }
+    .top-bar .status-item {
+        margin-right: 15px;
+    }
+    .top-bar .status-item .badge {
+        font-size: 0.8rem;
+    }
+    .top-bar .llmchat-brand {
+        font-weight: bold;
+    }
+
+    /* Main Layout: Sidebar + Content + Bottom Bar */
+    .main-layout {
+        display: flex;
+        flex-grow: 1; /* Allow this section to grow and fill available space */
+        overflow: hidden; /* Prevent overflow from this central part */
+    }
+
+    /* Left Sidebar */
+    .left-sidebar {
+        width: 280px;
+        background-color: #2c3034; /* Darker sidebar */
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto; /* Scroll for session list */
+        flex-shrink: 0;
+        border-right: 1px solid #495057;
+    }
+    .left-sidebar h5 {
+        color: #adb5bd;
+    }
+    .left-sidebar .list-group-item {
+        background-color: #343a40;
+        border-color: #495057;
+        color: #dee2e6;
+        cursor: pointer;
+        margin-bottom: 5px;
+        border-radius: 0.25rem;
+    }
+    .left-sidebar .list-group-item.active {
+        background-color: #0d6efd;
+        border-color: #0d6efd;
+        color: #fff;
+    }
+    .left-sidebar .list-group-item:hover {
+        background-color: #495057;
+    }
+    .left-sidebar .btn-group .btn {
+        font-size: 0.9rem;
+    }
+
+    /* Main Content Area */
+    .main-content-area {
+        flex-grow: 1;
+        display: flex;
+        flex-direction: column; /* Stack tabs content and chat input */
+        background-color: #2b2b2b; /* Slightly different dark for content */
+        padding: 0; /* Tabs will handle their own padding */
+        overflow: hidden; /* Ensure content area itself doesn't cause scrollbars */
+    }
+
+    .main-content-area .nav-tabs .nav-link {
+        color: #adb5bd;
+        border-top-left-radius: 0.25rem;
+        border-top-right-radius: 0.25rem;
+        background-color: #343a40;
+        border-bottom-color: #2b2b2b; /* Match content background */
+        margin-right: 2px;
+    }
+    .main-content-area .nav-tabs .nav-link.active {
+        color: #f8f9fa;
+        background-color: #2b2b2b; /* Active tab matches content background */
+        border-color: #495057 #495057 #2b2b2b;
+    }
+    .main-content-area .tab-content {
+        flex-grow: 1;
+        padding: 1rem;
+        overflow-y: auto; /* Allow content within tabs to scroll */
+        background-color: #2b2b2b;
+    }
+
+    /* Chat Tab Specifics */
+    #chat-messages {
+        height: calc(100% - 120px); /* Adjust based on input area height */
+        overflow-y: auto;
+        padding: 10px;
+        display: flex;
+        flex-direction: column-reverse; /* New messages at the bottom, scroll up */
+    }
+    .message-bubble {
+        padding: 8px 12px;
+        border-radius: 15px;
+        margin-bottom: 10px;
+        max-width: 75%;
+        word-wrap: break-word;
+    }
+    .user-message {
+        background-color: #007bff; /* Bootstrap primary blue */
+        color: white;
+        align-self: flex-end;
+        border-bottom-right-radius: 5px;
+    }
+    .agent-message {
+        background-color: #495057; /* Darker gray for agent */
+        color: #f8f9fa;
+        align-self: flex-start;
+        border-bottom-left-radius: 5px;
+    }
+    .message-bubble.error-message-bubble {
+        background-color: #dc3545; /* Bootstrap danger red for errors */
+        color: white;
+    }
+    .message-actions {
+        font-size: 0.75rem; /* Smaller action buttons */
+    }
+    .message-actions .btn {
+        padding: 0.1rem 0.3rem; /* Smaller padding for buttons */
+    }
+
+    #chat-input-area {
+        padding: 10px;
+        background-color: #343a40; /* Match top-bar/sidebar elements */
+        border-top: 1px solid #495057;
+        flex-shrink: 0; /* Prevent shrinking */
+    }
+    #chat-input-area textarea {
+        background-color: #2c3034;
+        color: #dee2e6;
+        border-color: #495057;
+    }
+    #chat-input-area textarea::placeholder {
+        color: #6c757d;
+    }
+
+    /* Bottom Control Bar */
+    .bottom-control-bar {
+        background-color: #343a40;
+        padding: 0; /* Tabs will handle padding */
+        flex-shrink: 0; /* Prevent bottom bar from shrinking */
+        border-top: 1px solid #495057;
+    }
+    .bottom-control-bar .nav-tabs .nav-link {
+        color: #adb5bd;
+        border-top-left-radius: 0;
+        border-top-right-radius: 0;
+        border-bottom-left-radius: 0.25rem;
+        border-bottom-right-radius: 0.25rem;
+        background-color: #2c3034; /* Slightly darker than bar itself for inactive tabs */
+        border-top-color: #343a40; /* Match bar background */
+        margin-right: 2px;
+    }
+    .bottom-control-bar .nav-tabs .nav-link.active {
+        color: #f8f9fa;
+        background-color: #343a40; /* Active tab matches bar background */
+        border-color: #495057 #495057 #343a40;
+    }
+    .bottom-control-bar .tab-content {
+        padding: 0.75rem;
+        background-color: #343a40;
+        min-height: 120px; /* Adjusted height for RAG controls */
+        max-height: 250px; /* Prevent it from getting too tall */
+        overflow-y: auto;
+    }
+    .bottom-control-bar .form-control,
+    .bottom-control-bar .form-select,
+    .bottom-control-bar .btn {
+        font-size: 0.9rem;
+    }
+    .bottom-control-bar .form-control,
+    .bottom-control-bar .form-select {
+        background-color: #2c3034;
+        color: #dee2e6;
+        border-color: #495057;
+    }
+    .bottom-control-bar .form-control::placeholder {
+        color: #6c757d;
+    }
+    .bottom-control-bar .form-check-input {
+        background-color: #495057;
+        border-color: #6c757d;
+    }
+    .bottom-control-bar .form-check-input:checked {
+        background-color: #0d6efd;
+        border-color: #0d6efd;
+    }
+
+    /* Utility for full height flex column (used by main-content-area and its tab-content) */
+    .d-flex-fill-column {
+        display: flex;
+        flex-direction: column;
+        flex-grow: 1;
+        overflow: hidden;
+    }
+    .tab-pane-full-height {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* Workspace Item Styling */
+    .workspace-item,
+    .staged-context-item {
+        background-color: #3a3f44;
+        border: 1px solid #495057;
+        border-radius: 0.25rem;
+        padding: 0.5rem 0.75rem;
+        margin-bottom: 0.5rem;
+    }
+    .workspace-item-header,
+    .staged-item-header {
+        font-size: 0.9rem;
+        font-weight: bold;
+        color: #adb5bd;
+    }
+    .workspace-item-content-preview,
+    .staged-item-content-preview {
+        font-size: 0.85rem;
+        color: #ced4da;
+        max-height: 60px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: pre-wrap;
+    }
+    .workspace-item-actions .btn,
+    .staged-item-actions .btn {
+        font-size: 0.75rem;
+        padding: 0.1rem 0.3rem;
+    }
+    #context-preview-query-input {
+        background-color: #2c3034;
+        color: #dee2e6;
+        border-color: #495057;
+    }
+    #context-preview-query-input::placeholder {
+        color: #6c757d;
+    }
+
+    /* Ingestion Modal Styling */
+    #ingestionModal .nav-tabs .nav-link {
+        background-color: #495057; /* Darker inactive tab for modal */
+        color: #adb5bd;
+        border-bottom-color: #343a40; /* Match modal body background */
+    }
+    #ingestionModal .nav-tabs .nav-link.active {
+        background-color: #343a40; /* Active tab matches modal body */
+        color: #f8f9fa;
+        border-color: #495057 #495057 #343a40;
+    }
+    #ingestionModal .form-label {
+        font-size: 0.9rem;
+    }
+    #ingestionModal .form-control,
+    #ingestionModal .form-select {
+        font-size: 0.9rem;
+        background-color: #2c3034;
+        color: #dee2e6;
+        border-color: #495057;
+    }
+    #ingestionModal .form-control::placeholder {
+        color: #6c757d;
+    }
+    #ingestion-progress-bar {
+        height: 10px;
+    }
+
+    /* Settings Tab Specific Styles */
+    #settings-pane .form-label {
+        font-size: 0.9rem;
+        color: #adb5bd;
+    }
+    #settings-pane .form-select,
+    #settings-pane .form-control {
+        background-color: #343a40;
+        color: #dee2e6;
+        border-color: #495057;
+        font-size: 0.9rem;
+    }
+    #settings-pane .form-select:disabled,
+    #settings-pane .form-control:disabled {
+        background-color: #495057;
+        opacity: 0.7;
+    }
+    #settings-pane .btn {
+        font-size: 0.9rem;
+    }
+    #settings-pane h5,
+    #settings-pane h6, /* Apply to subheadings in Settings tab too */
+    #rag-pane h6 {
+        color: #ced4da;
+        margin-top: 1rem;
+        margin-bottom: 0.75rem;
+        border-bottom: 1px solid #495057;
+        padding-bottom: 0.25rem;
+    }
+
+    /* Direct RAG Search Results Modal */
+    #directRagSearchResultsModal .modal-body {
+        font-size: 0.85rem;
+    }
+    #directRagSearchResultsModal .list-group-item {
+        background-color: #3a3f44;
+        border-color: #495057;
+        color: #dee2e6;
+        padding: 0.5rem 0.75rem;
+    }
+    #directRagSearchResultsModal .list-group-item strong {
+        color: #88c0d0; /* Nord cyan for IDs/scores */
+    }
+    #directRagSearchResultsModal pre {
+        background-color: #2c3034;
+        padding: 5px;
+        border-radius: 3px;
+        max-height: 80px;
+        overflow-y: auto;
+        font-size: 0.8em;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+
+    /* Prompt Template Values Table Styling */
+    #prompt-values-table th,
+    #prompt-values-table td {
+        font-size: 0.85rem;
+        vertical-align: middle;
+    }
+    #prompt-values-table .form-control-sm {
+        font-size: 0.85rem; /* Ensure inputs are also small */
+    }
+    #prompt-values-table .btn-sm {
+        padding: 0.2rem 0.4rem; /* Slightly smaller buttons */
+        font-size: 0.75rem;
+    }
+</style>
+{% endblock %} {% block body %}
+<nav class="top-bar d-flex justify-content-between align-items-center">
+    <div>
+        <span class="llmchat-brand"
+            >LLMChat Web
+            <small id="app-version-display" class="text-muted"
+                >v{{ app_version }}</small
+            >
+        </span>
+    </div>
+    <div class="d-flex">
+        <span class="status-item"
+            >Provider:
+            <span id="status-provider" class="badge bg-secondary">N/A</span>
+        </span>
+        <span class="status-item"
+            >Model:
+            <span id="status-model" class="badge bg-secondary">N/A</span>
+        </span>
+        <span class="status-item"
+            >RAG: <span id="status-rag" class="badge bg-danger">OFF</span></span
+        >
+        <span class="status-item"
+            >Coworker:
+            <span id="status-coworker" class="badge bg-danger">OFF</span>
+        </span>
+        <span class="status-item"
+            >Context:
+            <span id="status-context-usage" class="badge bg-info"
+                >0/0 (0%)</span
+            >
+        </span>
+    </div>
+</nav>
+
+<div class="main-layout flex-grow-1">
+    <aside class="left-sidebar">
+        <h5><i class="fas fa-comments"></i> Sessions</h5>
+        <div class="btn-group w-100 mb-3" role="group">
+            <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                id="btn-new-session"
+            >
+                <i class="fas fa-plus-circle"></i> New
+            </button>
+            <button
+                type="button"
+                class="btn btn-outline-secondary btn-sm"
+                id="btn-delete-session"
+                disabled
+            >
+                <i class="fas fa-trash-alt"></i> Delete
+            </button>
+        </div>
+        <div id="session-list" class="list-group">
+            <p class="text-muted small m-2">Loading sessions...</p>
+        </div>
+        <div class="mt-auto pt-2">
+            <small class="text-muted"
+                >LLMCore Status:
+                <span id="llmcore-status-sidebar" class="badge bg-success"
+                    >OK</span
+                >
+            </small>
+        </div>
+    </aside>
+
+    <main class="main-content-area d-flex-fill-column">
+        <ul class="nav nav-tabs px-2 pt-2" id="mainContentTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button
+                    class="nav-link active"
+                    id="chat-tab-btn"
+                    data-bs-toggle="tab"
+                    data-bs-target="#chat-tab-pane"
+                    type="button"
+                    role="tab"
+                    aria-controls="chat-tab-pane"
+                    aria-selected="true"
+                >
+                    <i class="fas fa-comment-dots"></i> Chat
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button
+                    class="nav-link"
+                    id="context-manager-tab-btn"
+                    data-bs-toggle="tab"
+                    data-bs-target="#context-manager-tab-pane"
+                    type="button"
+                    role="tab"
+                    aria-controls="context-manager-tab-pane"
+                    aria-selected="false"
+                >
+                    <i class="fas fa-folder-open"></i> Context Manager
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button
+                    class="nav-link"
+                    id="raw-output-tab-btn"
+                    data-bs-toggle="tab"
+                    data-bs-target="#raw-output-tab-pane"
+                    type="button"
+                    role="tab"
+                    aria-controls="raw-output-tab-pane"
+                    aria-selected="false"
+                >
+                    <i class="fas fa-code"></i> Raw Output
+                </button>
+            </li>
+        </ul>
+        <div
+            class="tab-content flex-grow-1"
+            id="mainContentTabsContent"
+            style="overflow-y: hidden"
+        >
+            <div
+                class="tab-pane fade show active tab-pane-full-height"
+                id="chat-tab-pane"
+                role="tabpanel"
+                aria-labelledby="chat-tab-btn"
+                tabindex="0"
+            >
+                <div id="chat-messages" class="flex-grow-1">
+                    <div class="message-bubble agent-message">
+                        Welcome to LLMChat Web! Start a new session or load an
+                        existing one.
+                    </div>
+                </div>
+                <div id="chat-input-area">
+                    <div class="input-group">
+                        <textarea
+                            class="form-control"
+                            id="chat-input"
+                            rows="3"
+                            placeholder="Type your message or /command..."
+                        ></textarea>
+                        <button
+                            class="btn btn-primary"
+                            type="button"
+                            id="send-chat-message"
+                        >
+                            <i class="fas fa-paper-plane"></i> Send
+                        </button>
+                    </div>
+                    <div class="mt-1 text-end">
+                        <small class="text-muted" id="chat-input-token-estimate"
+                            >Tokens: 0</small
+                        >
+                    </div>
+                </div>
+            </div>
+            <div
+                class="tab-pane fade tab-pane-full-height"
+                id="context-manager-tab-pane"
+                role="tabpanel"
+                aria-labelledby="context-manager-tab-btn"
+                tabindex="0"
+            >
+                <div class="row h-100">
+                    <div class="col-md-6 d-flex flex-column h-100">
+                        <h5>
+                            <i class="fas fa-briefcase"></i> Workspace Items
+                            (Context Pool)
+                        </h5>
+                        <div
+                            id="workspace-items-list"
+                            class="mb-3 border rounded p-2 flex-grow-1"
+                            style="overflow-y: auto"
+                        >
+                            <p class="text-muted p-2">
+                                Workspace items for the current session will
+                                appear here...
+                            </p>
+                        </div>
+                        <div class="mt-auto">
+                            <h6>
+                                <i class="fas fa-plus-circle"></i> Add Text
+                                Snippet
+                            </h6>
+                            <form id="form-add-text-snippet" class="mb-3">
+                                <div class="mb-2">
+                                    <label
+                                        for="text-snippet-content"
+                                        class="form-label form-label-sm"
+                                        >Content:</label
+                                    >
+                                    <textarea
+                                        class="form-control form-control-sm"
+                                        id="text-snippet-content"
+                                        rows="2"
+                                        required
+                                    ></textarea>
+                                </div>
+                                <div class="mb-2">
+                                    <label
+                                        for="text-snippet-id"
+                                        class="form-label form-label-sm"
+                                        >Optional Item ID:</label
+                                    >
+                                    <input
+                                        type="text"
+                                        class="form-control form-control-sm"
+                                        id="text-snippet-id"
+                                        placeholder="Auto-generated if blank"
+                                    />
+                                </div>
+                                <button
+                                    type="submit"
+                                    class="btn btn-sm btn-success"
+                                >
+                                    <i class="fas fa-plus"></i> Add Snippet
+                                </button>
+                            </form>
+                            <hr />
+                            <h6>
+                                <i class="fas fa-file-medical"></i> Add File by
+                                Server Path
+                            </h6>
+                            <form id="form-add-file-by-path" class="mb-2">
+                                <div class="mb-2">
+                                    <label
+                                        for="file-path-input"
+                                        class="form-label form-label-sm"
+                                        >Server File Path:</label
+                                    >
+                                    <input
+                                        type="text"
+                                        class="form-control form-control-sm"
+                                        id="file-path-input"
+                                        placeholder="/path/to/your/file_on_server.txt"
+                                        required
+                                    />
+                                </div>
+                                <div class="mb-2">
+                                    <label
+                                        for="file-item-id"
+                                        class="form-label form-label-sm"
+                                        >Optional Item ID:</label
+                                    >
+                                    <input
+                                        type="text"
+                                        class="form-control form-control-sm"
+                                        id="file-item-id"
+                                        placeholder="Auto-generated if blank"
+                                    />
+                                </div>
+                                <button
+                                    type="submit"
+                                    class="btn btn-sm btn-success"
+                                >
+                                    <i class="fas fa-plus"></i> Add File
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="col-md-6 d-flex flex-column h-100">
+                        <h5>
+                            <i class="fas fa-cogs"></i> Active Context
+                            Specification (for next prompt)
+                        </h5>
+                        <div class="input-group mb-2">
+                            <span class="input-group-text"
+                                ><i class="fas fa-search"></i
+                            ></span>
+                            <input
+                                type="text"
+                                class="form-control form-control-sm"
+                                id="context-preview-query-input"
+                                placeholder="Optional: Type next query for more accurate preview..."
+                            />
+                        </div>
+                        <div
+                            id="active-context-spec-list"
+                            class="border rounded p-2 mb-2 flex-grow-1"
+                            style="overflow-y: auto"
+                        >
+                            <p class="text-muted p-2">
+                                Staged items for the next prompt will appear
+                                here. Add from Workspace, History, or create
+                                new.
+                            </p>
+                        </div>
+                        <div class="mt-auto">
+                            <p class="small text-muted">
+                                Add to Active Context:
+                            </p>
+                            <div class="btn-group w-100 mb-2" role="group">
+                                <button
+                                    class="btn btn-sm btn-outline-primary"
+                                    id="btn-stage-from-workspace"
+                                    title="Select from Workspace Items"
+                                >
+                                    <i class="fas fa-briefcase"></i> Workspace
+                                </button>
+                                <button
+                                    class="btn btn-sm btn-outline-primary"
+                                    id="btn-stage-from-history"
+                                    title="Select from Chat History"
+                                >
+                                    <i class="fas fa-history"></i> History
+                                </button>
+                                <button
+                                    class="btn btn-sm btn-outline-primary"
+                                    id="btn-stage-new-file"
+                                    title="Add a new file by path"
+                                >
+                                    <i class="fas fa-file-alt"></i> New File
+                                </button>
+                                <button
+                                    class="btn btn-sm btn-outline-primary"
+                                    id="btn-stage-new-text"
+                                    title="Add a new text snippet"
+                                >
+                                    <i class="fas fa-file-signature"></i> New
+                                    Text
+                                </button>
+                            </div>
+                            <button
+                                class="btn btn-sm btn-info w-100"
+                                id="btn-preview-full-context"
+                            >
+                                <i class="fas fa-eye"></i> Preview Full Context
+                                for Next Prompt
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div
+                class="tab-pane fade tab-pane-full-height"
+                id="raw-output-tab-pane"
+                role="tabpanel"
+                aria-labelledby="raw-output-tab-btn"
+                tabindex="0"
+            >
+                <h5>Last Raw LLM Output</h5>
+                <pre
+                    id="raw-llm-output-display"
+                    style="
+                        white-space: pre-wrap;
+                        word-wrap: break-word;
+                        max-height: 100%;
+                        overflow-y: auto;
+                    "
+                >
+Raw output will appear here...</pre
+                >
+            </div>
+        </div>
+    </main>
+</div>
+
+<nav class="bottom-control-bar">
+    <ul class="nav nav-tabs nav-fill" id="bottomControlTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button
+                class="nav-link active"
+                id="cmd-prompt-tab-btn"
+                data-bs-toggle="tab"
+                data-bs-target="#cmd-prompt-pane"
+                type="button"
+                role="tab"
+                aria-controls="cmd-prompt-pane"
+                aria-selected="true"
+            >
+                <i class="fas fa-terminal"></i> Command
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button
+                class="nav-link"
+                id="files-tab-btn"
+                data-bs-toggle="tab"
+                data-bs-target="#files-pane"
+                type="button"
+                role="tab"
+                aria-controls="files-pane"
+                aria-selected="false"
+            >
+                <i class="fas fa-folder"></i> Files
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button
+                class="nav-link"
+                id="rag-tab-btn"
+                data-bs-toggle="tab"
+                data-bs-target="#rag-pane"
+                type="button"
+                role="tab"
+                aria-controls="rag-pane"
+                aria-selected="false"
+            >
+                <i class="fas fa-brain"></i> RAG
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button
+                class="nav-link"
+                id="logs-tab-btn"
+                data-bs-toggle="tab"
+                data-bs-target="#logs-pane"
+                type="button"
+                role="tab"
+                aria-controls="logs-pane"
+                aria-selected="false"
+            >
+                <i class="fas fa-stream"></i> Logs
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button
+                class="nav-link"
+                id="settings-tab-btn"
+                data-bs-toggle="tab"
+                data-bs-target="#settings-pane"
+                type="button"
+                role="tab"
+                aria-controls="settings-pane"
+                aria-selected="false"
+            >
+                <i class="fas fa-cog"></i> Settings
+            </button>
+        </li>
+    </ul>
+    <div class="tab-content" id="bottomControlTabsContent">
+        <div
+            class="tab-pane fade show active p-2"
+            id="cmd-prompt-pane"
+            role="tabpanel"
+            aria-labelledby="cmd-prompt-tab-btn"
+            tabindex="0"
+        >
+            <input
+                type="text"
+                class="form-control form-control-sm"
+                id="repl-command-input"
+                placeholder="Type REPL /commands here..."
+            />
+            <div
+                id="repl-command-output"
+                class="mt-2 small"
+                style="max-height: 100px; overflow-y: auto"
+            ></div>
+        </div>
+        <div
+            class="tab-pane fade p-2"
+            id="files-pane"
+            role="tabpanel"
+            aria-labelledby="files-tab-btn"
+            tabindex="0"
+        >
+            <p class="small text-muted">File management UI will go here.</p>
+            <button
+                class="btn btn-sm btn-outline-primary"
+                id="btn-add-file-to-workspace-bottom"
+            >
+                <i class="fas fa-file-upload"></i> Add File to Workspace
+            </button>
+        </div>
+        <div
+            class="tab-pane fade p-2"
+            id="rag-pane"
+            role="tabpanel"
+            aria-labelledby="rag-tab-btn"
+            tabindex="0"
+        >
+            <h6><i class="fas fa-cogs"></i> RAG Configuration</h6>
+            <form id="rag-controls-form">
+                <div class="row g-2 align-items-center">
+                    <div class="col-auto">
+                        <div class="form-check form-switch">
+                            <input
+                                class="form-check-input"
+                                type="checkbox"
+                                role="switch"
+                                id="rag-toggle-switch"
+                            />
+                            <label
+                                class="form-check-label small"
+                                for="rag-toggle-switch"
+                                >Enable RAG</label
+                            >
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <label
+                            for="rag-collection-select"
+                            class="form-label form-label-sm visually-hidden"
+                            >RAG Collection</label
+                        >
+                        <select
+                            class="form-select form-select-sm"
+                            id="rag-collection-select"
+                            aria-label="Select RAG Collection"
+                            disabled
+                        >
+                            <option selected value="">
+                                Select Collection...
+                            </option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label
+                            for="rag-k-value"
+                            class="form-label form-label-sm visually-hidden"
+                            >K Value</label
+                        >
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">K:</span>
+                            <input
+                                type="number"
+                                class="form-control"
+                                id="rag-k-value"
+                                value="3"
+                                min="1"
+                                max="20"
+                                disabled
+                            />
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <label
+                            for="rag-filter-input"
+                            class="form-label form-label-sm visually-hidden"
+                            >Metadata Filter</label
+                        >
+                        <input
+                            type="text"
+                            class="form-control form-control-sm"
+                            id="rag-filter-input"
+                            placeholder="Metadata Filter (JSON)..."
+                            disabled
+                        />
+                    </div>
+                    <div class="col-auto">
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-success"
+                            id="btn-ingest-data"
+                            title="Ingest new data into a RAG collection"
+                        >
+                            <i class="fas fa-database"></i> Ingest Data
+                        </button>
+                    </div>
+                </div>
+            </form>
+
+            <hr class="my-3" />
+            <h6><i class="fas fa-search"></i> Direct RAG Search</h6>
+            <form id="direct-rag-search-form">
+                <div class="input-group input-group-sm mb-2">
+                    <input
+                        type="text"
+                        class="form-control"
+                        id="direct-rag-search-query"
+                        placeholder="Enter search query..."
+                        required
+                    />
+                    <button
+                        class="btn btn-info"
+                        type="submit"
+                        id="btn-direct-rag-search"
+                    >
+                        <i class="fas fa-search"></i> Search
+                    </button>
+                </div>
+            </form>
+            <p class="small text-muted mt-1">
+                Uses current RAG settings (collection, K, filter) for the
+                search. Results will appear in a modal.
+            </p>
+        </div>
+        <div
+            class="tab-pane fade p-2"
+            id="logs-pane"
+            role="tabpanel"
+            aria-labelledby="logs-tab-btn"
+            tabindex="0"
+        >
+            <pre
+                id="app-logs-display"
+                style="max-height: 150px; overflow-y: auto; font-size: 0.8rem"
+            >
+Application logs will appear here...</pre
+            >
+        </div>
+        <div
+            class="tab-pane fade p-2"
+            id="settings-pane"
+            role="tabpanel"
+            aria-labelledby="settings-tab-btn"
+            tabindex="0"
+        >
+            <h5><i class="fas fa-robot"></i> LLM Configuration</h5>
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label for="llm-provider-select" class="form-label"
+                        >Provider:</label
+                    >
+                    <select
+                        class="form-select"
+                        id="llm-provider-select"
+                        aria-label="Select LLM Provider"
+                    >
+                        <option selected value="">Loading providers...</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label for="llm-model-select" class="form-label"
+                        >Model:</label
+                    >
+                    <select
+                        class="form-select"
+                        id="llm-model-select"
+                        aria-label="Select LLM Model"
+                        disabled
+                    >
+                        <option selected value="">Select provider first</option>
+                    </select>
+                </div>
+            </div>
+            <button
+                type="button"
+                class="btn btn-primary btn-sm mb-3"
+                id="btn-apply-llm-settings"
+            >
+                <i class="fas fa-check-circle"></i> Apply LLM Settings
+            </button>
+
+            <hr class="my-3" />
+
+            <h5><i class="fas fa-user-cog"></i> System Message</h5>
+            <div class="mb-3">
+                <label for="system-message-input" class="form-label"
+                    >Set System Message for current session:</label
+                >
+                <textarea
+                    class="form-control"
+                    id="system-message-input"
+                    rows="3"
+                    placeholder="e.g., You are a helpful assistant specializing in Python programming."
+                ></textarea>
+            </div>
+            <button
+                type="button"
+                class="btn btn-primary btn-sm mb-3"
+                id="btn-apply-system-message"
+            >
+                <i class="fas fa-save"></i> Apply System Message
+            </button>
+
+            <hr class="my-3" />
+            <h6>
+                <i class="fas fa-file-code"></i> Prompt Template Values (RAG)
+            </h6>
+            <p class="small text-muted">
+                Define custom key-value pairs for placeholders (e.g.,
+                <code>{my_key}</code>) in your RAG prompt template.
+            </p>
+            <div
+                class="table-responsive mb-2"
+                style="max-height: 200px; overflow-y: auto"
+            >
+                <table
+                    class="table table-sm table-dark table-striped table-hover"
+                    id="prompt-values-table"
+                >
+                    <thead>
+                        <tr>
+                            <th scope="col" style="width: 35%">Key</th>
+                            <th scope="col" style="width: 45%">Value</th>
+                            <th scope="col" style="width: 20%">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="prompt-values-tbody">
+                        <tr>
+                            <td colspan="3" class="text-center text-muted">
+                                No prompt values set.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <form
+                id="form-add-prompt-value"
+                class="row gx-2 gy-2 align-items-end mb-2"
+            >
+                <div class="col-md-4">
+                    <label
+                        for="new-prompt-key"
+                        class="form-label form-label-sm visually-hidden"
+                        >New Key</label
+                    >
+                    <input
+                        type="text"
+                        class="form-control form-control-sm"
+                        id="new-prompt-key"
+                        placeholder="Enter Key"
+                        required
+                    />
+                </div>
+                <div class="col-md-5">
+                    <label
+                        for="new-prompt-value"
+                        class="form-label form-label-sm visually-hidden"
+                        >New Value</label
+                    >
+                    <input
+                        type="text"
+                        class="form-control form-control-sm"
+                        id="new-prompt-value"
+                        placeholder="Enter Value"
+                        required
+                    />
+                </div>
+                <div class="col-md-3">
+                    <button type="submit" class="btn btn-success btn-sm w-100">
+                        <i class="fas fa-plus"></i> Add Value
+                    </button>
+                </div>
+            </form>
+            <button
+                type="button"
+                class="btn btn-danger btn-sm"
+                id="btn-clear-all-prompt-values"
+            >
+                <i class="fas fa-trash-alt"></i> Clear All Values
+            </button>
+            <p class="small text-muted mt-2">
+                Changes to prompt values are applied immediately for the current
+                session.
+            </p>
+        </div>
+    </div>
+</nav>
+
+<div
+    class="modal fade"
+    id="viewItemContentModal"
+    tabindex="-1"
+    aria-labelledby="viewItemContentModalLabel"
+    aria-hidden="true"
+>
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title" id="viewItemContentModalLabel">
+                    Item Content
+                </h5>
+                <button
+                    type="button"
+                    class="btn-close btn-close-white"
+                    data-bs-dismiss="modal"
+                    aria-label="Close"
+                ></button>
+            </div>
+            <div class="modal-body">
+                <pre
+                    id="modalItemContentDisplay"
+                    style="white-space: pre-wrap; word-wrap: break-word"
+                ></pre>
+            </div>
+            <div class="modal-footer">
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-bs-dismiss="modal"
+                >
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div
+    class="modal fade"
+    id="contextPreviewModal"
+    tabindex="-1"
+    aria-labelledby="contextPreviewModalLabel"
+    aria-hidden="true"
+>
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title" id="contextPreviewModalLabel">
+                    <i class="fas fa-search-plus"></i> Full Context Preview
+                </h5>
+                <button
+                    type="button"
+                    class="btn-close btn-close-white"
+                    data-bs-dismiss="modal"
+                    aria-label="Close"
+                ></button>
+            </div>
+            <div
+                class="modal-body"
+                id="modalContextPreviewDisplay"
+                style="font-size: 0.85rem"
+            >
+                <p class="text-muted">Loading context preview...</p>
+            </div>
+            <div class="modal-footer">
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-bs-dismiss="modal"
+                >
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div
+    class="modal fade"
+    id="ingestionModal"
+    tabindex="-1"
+    aria-labelledby="ingestionModalLabel"
+    aria-hidden="true"
+>
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title" id="ingestionModalLabel">
+                    <i class="fas fa-upload"></i> Ingest Data for RAG
+                </h5>
+                <button
+                    type="button"
+                    class="btn-close btn-close-white"
+                    data-bs-dismiss="modal"
+                    aria-label="Close"
+                ></button>
+            </div>
+            <div class="modal-body">
+                <ul
+                    class="nav nav-tabs mb-3"
+                    id="ingestionTypeTabs"
+                    role="tablist"
+                >
+                    <li class="nav-item" role="presentation">
+                        <button
+                            class="nav-link active"
+                            id="ingest-file-tab"
+                            data-bs-toggle="tab"
+                            data-bs-target="#ingest-file-pane"
+                            type="button"
+                            role="tab"
+                            aria-controls="ingest-file-pane"
+                            aria-selected="true"
+                        >
+                            <i class="fas fa-file-alt"></i> Upload File(s)
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button
+                            class="nav-link"
+                            id="ingest-dir-tab"
+                            data-bs-toggle="tab"
+                            data-bs-target="#ingest-dir-pane"
+                            type="button"
+                            role="tab"
+                            aria-controls="ingest-dir-pane"
+                            aria-selected="false"
+                        >
+                            <i class="fas fa-folder-open"></i> Upload Directory
+                            (ZIP)
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button
+                            class="nav-link"
+                            id="ingest-git-tab"
+                            data-bs-toggle="tab"
+                            data-bs-target="#ingest-git-pane"
+                            type="button"
+                            role="tab"
+                            aria-controls="ingest-git-pane"
+                            aria-selected="false"
+                        >
+                            <i class="fab fa-git-alt"></i> Git Repository URL
+                        </button>
+                    </li>
+                </ul>
+                <div class="tab-content" id="ingestionTypeTabsContent">
+                    <div
+                        class="tab-pane fade show active"
+                        id="ingest-file-pane"
+                        role="tabpanel"
+                        aria-labelledby="ingest-file-tab"
+                    >
+                        <form id="form-ingest-file">
+                            <div class="mb-3">
+                                <label
+                                    for="ingest-file-input"
+                                    class="form-label"
+                                    >Select File(s):</label
+                                >
+                                <input
+                                    class="form-control"
+                                    type="file"
+                                    id="ingest-file-input"
+                                    multiple
+                                />
+                                <small class="form-text text-muted"
+                                    >Select one or more files to ingest.</small
+                                >
+                            </div>
+                            <div class="mb-3">
+                                <label
+                                    for="ingest-file-collection"
+                                    class="form-label"
+                                    >Target Collection Name:</label
+                                >
+                                <input
+                                    type="text"
+                                    class="form-control"
+                                    id="ingest-file-collection"
+                                    placeholder="e.g., project_docs_alpha"
+                                    required
+                                />
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-arrow-circle-up"></i> Start
+                                File Ingestion
+                            </button>
+                        </form>
+                    </div>
+                    <div
+                        class="tab-pane fade"
+                        id="ingest-dir-pane"
+                        role="tabpanel"
+                        aria-labelledby="ingest-dir-tab"
+                    >
+                        <form id="form-ingest-dir">
+                            <div class="mb-3">
+                                <label
+                                    for="ingest-dir-zip-input"
+                                    class="form-label"
+                                    >Select Directory ZIP File:</label
+                                >
+                                <input
+                                    class="form-control"
+                                    type="file"
+                                    id="ingest-dir-zip-input"
+                                    accept=".zip"
+                                    required
+                                />
+                            </div>
+                            <div class="mb-3">
+                                <label
+                                    for="ingest-dir-collection"
+                                    class="form-label"
+                                    >Target Collection Name:</label
+                                >
+                                <input
+                                    type="text"
+                                    class="form-control"
+                                    id="ingest-dir-collection"
+                                    placeholder="e.g., my_codebase_snapshot"
+                                    required
+                                />
+                            </div>
+                            <div class="mb-3">
+                                <label
+                                    for="ingest-dir-repo-name"
+                                    class="form-label"
+                                    >Repository/Directory Identifier
+                                    (Optional):</label
+                                >
+                                <input
+                                    type="text"
+                                    class="form-control"
+                                    id="ingest-dir-repo-name"
+                                    placeholder="e.g., MyProjectV1"
+                                />
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-archive"></i> Start Directory
+                                Ingestion
+                            </button>
+                        </form>
+                    </div>
+                    <div
+                        class="tab-pane fade"
+                        id="ingest-git-pane"
+                        role="tabpanel"
+                        aria-labelledby="ingest-git-tab"
+                    >
+                        <form id="form-ingest-git">
+                            <div class="mb-3">
+                                <label for="ingest-git-url" class="form-label"
+                                    >Git Repository URL:</label
+                                >
+                                <input
+                                    type="url"
+                                    class="form-control"
+                                    id="ingest-git-url"
+                                    placeholder="https://github.com/user/repo.git"
+                                    required
+                                />
+                            </div>
+                            <div class="mb-3">
+                                <label
+                                    for="ingest-git-collection"
+                                    class="form-label"
+                                    >Target Collection Name:</label
+                                >
+                                <input
+                                    type="text"
+                                    class="form-control"
+                                    id="ingest-git-collection"
+                                    placeholder="e.g., open_source_project_main"
+                                    required
+                                />
+                            </div>
+                            <div class="mb-3">
+                                <label
+                                    for="ingest-git-repo-name"
+                                    class="form-label"
+                                    >Repository Identifier:</label
+                                >
+                                <input
+                                    type="text"
+                                    class="form-control"
+                                    id="ingest-git-repo-name"
+                                    placeholder="e.g., LLMCoreProject"
+                                    required
+                                />
+                            </div>
+                            <div class="mb-3">
+                                <label for="ingest-git-ref" class="form-label"
+                                    >Branch/Tag/Commit (Optional):</label
+                                >
+                                <input
+                                    type="text"
+                                    class="form-control"
+                                    id="ingest-git-ref"
+                                    placeholder="e.g., main, v1.0.2, abc1234 (defaults to HEAD)"
+                                />
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fab fa-git-square"></i> Start Git
+                                Ingestion
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                <hr />
+                <div id="ingestion-status-area" class="mt-3">
+                    <p class="small text-muted">
+                        Ingestion progress will appear here...
+                    </p>
+                    <div
+                        class="progress"
+                        style="height: 10px; display: none"
+                        id="ingestion-progress-container"
+                    >
+                        <div
+                            class="progress-bar progress-bar-striped progress-bar-animated"
+                            id="ingestion-progress-bar"
+                            role="progressbar"
+                            style="width: 0%"
+                            aria-valuenow="0"
+                            aria-valuemin="0"
+                            aria-valuemax="100"
+                        ></div>
+                    </div>
+                    <div id="ingestion-result-message" class="mt-2 small"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-bs-dismiss="modal"
+                >
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div
+    class="modal fade"
+    id="directRagSearchResultsModal"
+    tabindex="-1"
+    aria-labelledby="directRagSearchResultsModalLabel"
+    aria-hidden="true"
+>
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title" id="directRagSearchResultsModalLabel">
+                    <i class="fas fa-search-location"></i> Direct RAG Search
+                    Results
+                </h5>
+                <button
+                    type="button"
+                    class="btn-close btn-close-white"
+                    data-bs-dismiss="modal"
+                    aria-label="Close"
+                ></button>
+            </div>
+            <div class="modal-body" id="directRagSearchResultsBody">
+                <p class="text-muted">Search results will appear here...</p>
+            </div>
+            <div class="modal-footer">
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-bs-dismiss="modal"
+                >
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div
+    id="toast-container"
+    class="toast-container position-fixed top-0 end-0 p-3"
+    style="z-index: 1056"
+></div>
+
+{% endblock %} {% block scripts_extra %}
+<script>
+    // Basic tab functionality
+    document.addEventListener("DOMContentLoaded", function () {
+        var triggerTabList = [].slice.call(
+            document.querySelectorAll(
+                "#mainContentTabs button, #bottomControlTabs button, #ingestionTypeTabs button", // Added ingestion modal tabs
+            ),
+        );
+        triggerTabList.forEach(function (triggerEl) {
+            var tabTrigger = new bootstrap.Tab(triggerEl);
+            triggerEl.addEventListener("click", function (event) {
+                event.preventDefault();
+                tabTrigger.show();
+            });
+        });
+    });
+</script>
+{% endblock %}
