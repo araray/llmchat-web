@@ -5,8 +5,9 @@ Main Flask application file for llmchat-web.
 This application initializes the Flask app, LLMCore, logging,
 and registers blueprints for routing. Core route logic is now in routes.py.
 The main_bp Blueprint is now defined here to avoid circular imports.
-LLMCore initialization is now deferred and called by the startup mechanism
-(e.g., web_commands.py or direct run).
+LLMCore initialization is now attempted at module load time to support
+Gunicorn workers, in addition to being called by external startup mechanisms
+or direct script execution.
 """
 
 # --- Start: Fix for direct script execution and relative imports ---
@@ -56,8 +57,6 @@ try:
     APP_VERSION = version("llmchat-web")
 except PackageNotFoundError:
     # Fallback version if llmchat-web is not installed (e.g., running source directly)
-    # For development, you might read this from pyproject.toml or a _version.py file.
-    # Reading directly from pyproject.toml in a fallback is complex, so a placeholder is used.
     APP_VERSION = "0.2.3-dev" # Ensure this matches the intended version in pyproject.toml
     logging.getLogger("llmchat_web_startup").info(
         f"llmchat-web package not found (or not installed), using fallback version: {APP_VERSION}. "
@@ -96,18 +95,16 @@ app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_ENV") == "production
 async def initialize_llmcore_async() -> None:
     """
     Asynchronously initializes the global LLMCore instance.
-    This function is called at application startup (e.g., by web_commands.py or direct run).
+    This function is called at application startup.
     It sets the global `llmcore_instance` and `llmcore_init_error`.
     """
-    global llmcore_instance, llmcore_init_error
+    global llmcore_instance, llmcore_init_error # Explicitly declare intent to modify globals
     if llmcore_instance is not None:
         logger.info("LLMCore instance already initialized.")
         return
     logger.info("Attempting to initialize LLMCore for llmchat-web...")
     try:
         # LLMCore.create() will use its own configuration mechanisms.
-        # If llmchat-web needs to pass specific overrides (e.g., from its own config),
-        # those would be passed here. For now, assuming LLMCore finds its standard config.
         llmcore_instance = await LLMCore.create()
 
         llmcore_logger = logging.getLogger("llmcore")
@@ -124,14 +121,64 @@ async def initialize_llmcore_async() -> None:
         error_msg = f"LLMCore Configuration Error: {e_conf}. LLMCore functionality will be unavailable."
         logger.critical(error_msg, exc_info=True)
         llmcore_init_error = error_msg
+        llmcore_instance = None # Ensure instance is None on error
     except LLMCoreError as e_core:
         error_msg = f"LLMCore Initialization Error: {e_core}. LLMCore functionality will be unavailable."
         logger.critical(error_msg, exc_info=True)
         llmcore_init_error = error_msg
+        llmcore_instance = None # Ensure instance is None on error
     except Exception as e:
         error_msg = f"Unexpected error during LLMCore initialization: {e}. LLMCore functionality will be unavailable."
         logger.critical(error_msg, exc_info=True)
         llmcore_init_error = error_msg
+        llmcore_instance = None # Ensure instance is None on error
+
+# --- LLMCore Initialization (Attempt at module load for WSGI servers like Gunicorn) ---
+# This section is crucial for Gunicorn workers to get an initialized LLMCore.
+# It runs when the module is first imported.
+# The `if llmcore_instance is None and llmcore_init_error is None:` check prevents
+# re-initialization if already done (e.g., by an external script) or if it failed.
+if llmcore_instance is None and llmcore_init_error is None:
+    logger.info("Attempting LLMCore initialization at module load time (e.g., for Gunicorn/WSGI)...")
+    try:
+        # For WSGI servers like Gunicorn (with sync workers),
+        # each worker process will import this module.
+        # asyncio.run() will create a new event loop, run the async init, and close the loop.
+        # This is generally safe for Gunicorn's default sync workers.
+        asyncio.run(initialize_llmcore_async())
+        if llmcore_instance:
+            logger.info("LLMCore successfully initialized at module load.")
+        elif llmcore_init_error: # Check if init function set an error
+            logger.error(f"LLMCore initialization at module load failed. Error: {llmcore_init_error}")
+        else:
+            # This case should ideally not be reached if initialize_llmcore_async behaves as expected
+            logger.error("LLMCore initialization at module load did not set instance or error.")
+            llmcore_init_error = "Unknown error during module load initialization."
+
+    except RuntimeError as e_runtime_module_load:
+        # This might happen if something else already started an asyncio loop in this context.
+        # For example, if Gunicorn is run with async workers (uvicorn.workers.UvicornWorker)
+        # and that worker has already started a loop.
+        if "cannot be called when another loop is running" in str(e_runtime_module_load):
+            logger.warning(
+                f"Asyncio RuntimeError during LLMCore init at module load: {e_runtime_module_load}. "
+                "This may be okay if an outer mechanism (e.g., ASGI server or web_commands.py) "
+                "is responsible for initialization within an existing loop."
+            )
+            # In this specific scenario, we don't set llmcore_init_error,
+            # as another part of the system might be about to initialize it.
+            # If it doesn't, the app will fail later, but this avoids a premature error state here.
+        else:
+            err_msg = f"Critical unhandled RuntimeError during LLMCore init at module load: {e_runtime_module_load}"
+            logger.critical(err_msg, exc_info=True)
+            if not llmcore_init_error: llmcore_init_error = err_msg
+            llmcore_instance = None
+    except Exception as e_module_load:
+        err_msg = f"Unexpected error during LLMCore init at module load: {e_module_load}"
+        logger.critical(err_msg, exc_info=True)
+        if not llmcore_init_error: llmcore_init_error = err_msg
+        llmcore_instance = None
+
 
 # --- Async to Sync Wrapper for Flask Routes (used by routes.py) ---
 def async_to_sync_in_flask(f: Callable[..., Coroutine[Any, Any, Any]]) -> Callable[..., Any]:
@@ -153,9 +200,10 @@ def async_to_sync_in_flask(f: Callable[..., Coroutine[Any, Any, Any]]) -> Callab
             asyncio.set_event_loop(loop)
             created_loop = True
 
-        if loop is None:
+        if loop is None: # Should not happen if new_event_loop succeeds
              logger.error("Failed to obtain an event loop for async_to_sync_in_flask.")
-             raise RuntimeError("Failed to obtain an event loop.")
+             # Consider raising an error or returning a Flask error response
+             raise RuntimeError("Failed to obtain an event loop for an async operation.")
         try:
             return loop.run_until_complete(f(*args, **kwargs))
         finally:
@@ -176,6 +224,8 @@ def async_to_sync_in_flask(f: Callable[..., Coroutine[Any, Any, Any]]) -> Callab
                 finally:
                     loop.close()
                     logger.debug("Event loop created by wrapper closed.")
+                    # Reset the event loop policy's current loop if we set it and closed it.
+                    # This helps avoid issues if other parts of the code try to get_event_loop() later.
                     if asyncio.get_event_loop_policy().get_event_loop() is loop:
                          asyncio.set_event_loop(None)
             elif not created_loop:
@@ -214,48 +264,48 @@ async def get_context_usage_info(session_id: Optional[str]) -> Optional[Dict[str
     return None
 
 
-# --- Application Startup: LLMCore Initialization ---
-# REMOVED: asyncio.run(initialize_llmcore_async())
-# LLMCore will be initialized by the server startup mechanism (e.g., web_commands.py)
-
-
 # --- Register Blueprints ---
-# Import routes AFTER app, main_bp are defined.
-# llmcore_instance will be None here, but routes.py checks for it at runtime.
+# Import routes AFTER app, main_bp are defined, and after LLMCore init attempt.
+# llmcore_instance might be None here if init failed, routes.py checks for it at runtime.
 from . import routes  # This executes routes.py, attaching routes to main_bp
 app.register_blueprint(main_bp) # Register the blueprint that routes.py has now populated
 logger.info("Main blueprint registered.")
 
 
-# --- Main Execution (for direct run, e.g., python llmchat_web/app.py) ---
+# --- Main Execution (for direct run, e.g., python -m llmchat_web.app) ---
 if __name__ == "__main__":
     port = int(os.environ.get("FLASK_RUN_PORT", 5000))
     is_debug_mode = os.environ.get("FLASK_ENV", "production").lower() == "development"
 
-    # Initialize LLMCore synchronously for direct run
-    logger.info("Running LLMCore asynchronous initialization for direct app run...")
-    try:
-        asyncio.run(initialize_llmcore_async())
-    except RuntimeError as e_runtime_direct:
-        if "cannot be called when another loop is running" in str(e_runtime_direct):
-            logger.warning(f"Asyncio loop already running (direct run), attempting to schedule LLMCore init: {e_runtime_direct}")
-            # This case is complex for direct run; usually means it's embedded.
-            # For simple `python app.py`, new_event_loop should work.
-            # If it's truly nested, the outer loop should manage.
-            # The primary fix is for daemon mode.
-            pass
-        else:
-            logger.critical(f"Critical RuntimeError during LLMCore initialization (direct run): {e_runtime_direct}", exc_info=True)
-            if not llmcore_init_error: llmcore_init_error = f"RuntimeError during LLMCore init (direct run): {e_runtime_direct}"
-    except Exception as e_startup_run_direct:
-        logger.critical(f"Critical error during asyncio.run(initialize_llmcore_async) (direct run): {e_startup_run_direct}", exc_info=True)
-        if not llmcore_init_error: llmcore_init_error = f"Failed during asyncio.run (direct run): {e_startup_run_direct}"
-
+    # LLMCore initialization for direct run.
+    # The module-level initialization attempt above handles the Gunicorn case.
+    # This ensures initialization if app.py is run directly and module-level one was skipped or needs re-attempt.
+    if llmcore_instance is None and llmcore_init_error is None:
+        logger.info("Running LLMCore asynchronous initialization for direct app run (if not already done)...")
+        try:
+            asyncio.run(initialize_llmcore_async())
+        except RuntimeError as e_runtime_direct:
+            if "cannot be called when another loop is running" in str(e_runtime_direct):
+                logger.warning(
+                    f"Asyncio loop already running (direct run), LLMCore init via asyncio.run skipped: {e_runtime_direct}. "
+                    "Assuming it was initialized by module-level attempt or other means."
+                )
+            else:
+                logger.critical(f"Critical RuntimeError during LLMCore initialization (direct run): {e_runtime_direct}", exc_info=True)
+                if not llmcore_init_error: llmcore_init_error = f"RuntimeError during LLMCore init (direct run): {e_runtime_direct}"
+                llmcore_instance = None
+        except Exception as e_startup_run_direct:
+            logger.critical(f"Critical error during asyncio.run(initialize_llmcore_async) (direct run): {e_startup_run_direct}", exc_info=True)
+            if not llmcore_init_error: llmcore_init_error = f"Failed during asyncio.run (direct run): {e_startup_run_direct}"
+            llmcore_instance = None
 
     logger.info(f"Starting llmchat-web Flask server directly on port {port} (Debug: {is_debug_mode})...")
-    if llmcore_init_error:
+    if llmcore_init_error and not llmcore_instance : # Only log critical error if instance is still None
         logger.error(f"LLMCore failed to initialize: {llmcore_init_error}. The application might not function correctly.")
     elif not llmcore_instance:
-        logger.warning("LLMCore instance is not available at server start (direct run). Functionality will be limited.")
+        logger.warning("LLMCore instance is not available at server start (direct run), despite initialization attempts. Functionality will be limited.")
+    else:
+        logger.info("LLMCore instance is available for direct run.")
+
 
     app.run(host="0.0.0.0", port=port, debug=is_debug_mode)
