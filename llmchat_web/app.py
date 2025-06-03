@@ -42,6 +42,7 @@ import secrets # Used for Flask secret key
 import uuid # Used for generating session IDs
 from functools import wraps # For decorators
 from typing import Any, Callable, Coroutine, Optional, Dict, Union, AsyncGenerator # Type hinting
+from importlib.metadata import version, PackageNotFoundError # Added for app versioning
 
 from flask import Flask, jsonify, render_template, request, Response, stream_with_context, Blueprint
 from flask import session as flask_session # Alias to avoid confusion with LLMCore's session
@@ -51,15 +52,16 @@ from llmcore.models import Message as LLMCoreMessage, ChatSession as LLMCoreChat
 
 # --- Application Version ---
 try:
-    # Assuming llmchat is installed or in PYTHONPATH if this web app is part of it
-    from llmchat import __version__ as APP_VERSION
-except ImportError:
-    # Fallback version if llmchat package is not found (e.g., running llmchat_web standalone)
-    APP_VERSION = "0.19.37-web"
-    # Log this situation as it might indicate an improper setup for a combined project
-    logging.getLogger("llmchat_web_startup").warning(
-        "Could not import __version__ from 'llmchat' package. Using fallback version. "
-        "Ensure 'llmchat' is installed or project structure allows this import if intended."
+    # Get version from this package's metadata
+    APP_VERSION = version("llmchat-web")
+except PackageNotFoundError:
+    # Fallback version if llmchat-web is not installed (e.g., running source directly)
+    # For development, you might read this from pyproject.toml or a _version.py file.
+    # Reading directly from pyproject.toml in a fallback is complex, so a placeholder is used.
+    APP_VERSION = "0.2.0-dev" # Ensure this matches the intended version in pyproject.toml
+    logging.getLogger("llmchat_web_startup").info(
+        f"llmchat-web package not found (or not installed), using fallback version: {APP_VERSION}. "
+        "This is normal if running directly from source without installation."
     )
 
 
@@ -103,6 +105,9 @@ async def initialize_llmcore_async() -> None:
         return
     logger.info("Attempting to initialize LLMCore for llmchat-web...")
     try:
+        # LLMCore.create() will use its own configuration mechanisms.
+        # If llmchat-web needs to pass specific overrides (e.g., from its own config),
+        # those would be passed here. For now, assuming LLMCore finds its standard config.
         llmcore_instance = await LLMCore.create()
 
         llmcore_logger = logging.getLogger("llmcore")

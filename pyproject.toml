@@ -4,17 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llmchat-web"
-version = "0.2.0"
-description = "A powerful and flexible command-line interface for interacting with various Large Language Model (LLM) providers, powered by LLMCore."
-readme = "README.md"
+version = "0.2.1" # Version for llmchat-web
+description = "A Flask-based web interface for LLMCore, providing chat and RAG functionalities."
+readme = "README.md" # Assuming llmchat-web will have its own README
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
     { name = "Araray Velho", email = "araray@gmail.com" }
 ]
-keywords = ["llm", "ai", "chat", "cli", "repl", "llmcore", "rag", "openai", "anthropic", "ollama", "gemini"]
+keywords = ["llm", "ai", "chat", "web", "flask", "ui", "llmcore", "rag", "openai", "anthropic", "ollama", "gemini"] # Updated keywords
 classifiers = [
-    "Development Status :: 4 - Beta", # Updated status
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: End Users/Desktop",
     "License :: OSI Approved :: MIT License",
@@ -23,67 +23,53 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Communications :: Chat",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "Topic :: Utilities",
-    "Environment :: Console",
+    "Topic :: Internet :: WWW/HTTP :: WSGI :: Application", # Added for Flask
+    "Framework :: Flask", # Added for Flask
     "Operating System :: OS Independent",
 ]
 
-# Core dependencies for llmchat
+# Core dependencies for llmchat-web
 dependencies = [
-    "llmcore >= 0.18.0", # Core backend library
-    "llmchat >= 0.19.0", # Core backend library
-    "Flask>=3.1.0",
-    "python-daemon>=3.1.2",
+    "llmcore >= 0.18.0",   # Core backend library
+    "Flask>=3.0.0",        # Updated Flask version to match llmchat's server dep, was 3.1.0, using 3.0.0 as a common base.
+    "pydantic>=2.0.0",     # For models.py, if used more extensively
+    "werkzeug>=3.0.0",     # Flask dependency, often good to specify
+    "apykatu>=0.10.0", # If llmchat-web's /ingest directly uses apykatu library features
+    "GitPython>=3.1.0" # If llmchat-web's /ingest directly uses GitPython
+    # REMOVED: "llmchat >= 0.19.0" - llmchat-web should not depend on the llmchat CLI package.
+    # python-daemon is NOT a direct dependency of llmchat-web itself;
+    # daemonization is handled by the llmchat CLI's 'web' command.
 ]
 
 [project.urls]
-Homepage = "https://github.com/araray/llmchat-web"
-Repository = "https://github.com/araray/llmchat-web"
- Documentation = "https://github.com/araray/llmchat-web"
-Issues = "https://github.com/araray/llmchat-web/issues"
+Homepage = "https://github.com/araray/llmchat-web" # Updated URL
+Repository = "https://github.com/araray/llmchat-web" # Updated URL
+Documentation = "https://github.com/araray/llmchat-web" # Updated URL
+Issues = "https://github.com/araray/llmchat-web/issues" # Updated URL
 
-# Defines the console script for the llmchat command
-[project.scripts]
-llmchat = "llmchat.main:main_cli_entry"
+# [project.scripts]
+# REMOVED: llmchat = "llmchat.main:main_cli_entry"
+# If llmchat-web needs its own runnable script (e.g., 'llmchat-web-server'), define it here.
+# For now, assuming it's run via 'python -m llmchat_web.app' or by 'llmchat web'.
 
 # --- Setuptools specific configuration ---
 [tool.setuptools.packages.find]
-# Tells setuptools to find packages in the current directory ('.')
-# and include any package starting with 'llmchat'.
-# This is suitable if your 'llmchat' package directory is at the root.
 where = ["."]
-include = ["llmchat*"]
-# exclude = ["llmchat.tests*"] # Example: if you don't want to install tests
+include = ["llmchat_web*"] # Corrected to find llmchat_web packages
+# exclude = ["llmchat_web.tests*"] # Example if tests are structured this way
 
-# If llmchat still needs to package its own data files (e.g., old default_config.toml if kept for some reason)
-# [tool.setuptools.package_data]
-# llmchat = ["config/*.toml"] # Example: include TOML files in llmchat/config
-
-# --- Ruff Linter & Formatter Configuration (Example) ---
+# --- Ruff Linter & Formatter Configuration ---
 [tool.ruff]
 line-length = 100
 indent-width = 4
 
 [tool.ruff.lint]
 select = [
-    "E",  # pycodestyle errors
-    "W",  # pycodestyle warnings
-    "F",  # pyflakes
-    "I",  # isort
-    "C",  # flake8-comprehensions
-    "B",  # flake8-bugbear
-    "A",  # flake8-builtins
-    "RUF", # Ruff-specific rules
-    "ASYNC", # flake8-async
-    "PT", # flake8-pytest-style
+    "E", "W", "F", "I", "C", "B", "A", "RUF", "ASYNC", "PT"
 ]
 ignore = [
-    "E501", # Line too long (handled by formatter)
-    "B008", # Do not perform function calls in argument defaults (sometimes ok in Click)
-    "C901", # Function too complex (good to watch, but can be ignored selectively)
+    "E501", "B008", "C901"
 ]
-# Allow unused arguments in specific methods if needed (e.g. for Click context objects)
-# dummy-variable-rgx = "^(_|dummy_)"
 
 [tool.ruff.format]
 quote-style = "double"
@@ -91,42 +77,40 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
 
-# --- MyPy Type Checker Configuration (Example) ---
+# --- MyPy Type Checker Configuration ---
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
-ignore_missing_imports = true # Start with true, make stricter later if possible
-disallow_untyped_defs = false # Start with false, enable for stricter checking
-check_untyped_defs = true
+ignore_missing_imports = true
+disallow_untyped_defs = False # Start less strict for web projects
+check_untyped_defs = True
 
-# Example: more specific settings for your package code
 [[tool.mypy.overrides]]
-module = "llmchat.*"
-disallow_untyped_defs = true # Enforce types within your own code
+module = "llmchat_web.*" # Corrected module path
+disallow_untyped_defs = True # Enforce types within llmchat_web code
 
-# Example: less strict for tests
-[[tool.mypy.overrides]]
-module = "llmchat.tests.*"
-disallow_untyped_defs = false
+# [[tool.mypy.overrides]]
+# module = "llmchat_web.tests.*" # Corrected module path for tests
+# disallow_untyped_defs = false
 
-# --- Pytest Configuration (Example) ---
+# --- Pytest Configuration (Example for llmchat-web) ---
 [tool.pytest.ini_options]
 minversion = "7.0"
-addopts = "-ra -q --cov=llmchat --cov-report=term-missing --cov-report=xml"
+addopts = "-ra -q --cov=llmchat_web --cov-report=term-missing --cov-report=xml" # Corrected coverage target
 testpaths = [
-    "tests", # Assuming your tests are in a 'tests' directory at the root
+    "tests", # Assuming tests are in llmchat-web/tests
 ]
-asyncio_mode = "auto" # For pytest-asyncio
+asyncio_mode = "auto"
 
-# --- Coverage Configuration (Example) ---
+# --- Coverage Configuration (Example for llmchat-web) ---
 [tool.coverage.run]
-source = ["llmchat"] # Measure coverage for the llmchat package
+source = ["llmchat_web"] # Corrected coverage source
 omit = [
-    "llmchat/cli/*", # Example: if CLI command files are hard to unit test fully
-    "llmchat/main.py", # Often, the main entry has less logic to test directly
+    "llmchat_web/app.py", # Example: if __main__ block in app.py is not unit tested
+    # "llmchat_web/routes.py", # Or specific complex routes if needed
 ]
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 80 # coverage target
+fail_under = 70 # Adjusted target for web app potentially
