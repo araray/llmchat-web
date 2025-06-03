@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llmchat-web"
-version = "0.2.5" # Version for llmchat-web
+version = "0.2.6" # Version for llmchat-web
 description = "A Flask-based web interface for LLMCore, providing chat and RAG functionalities."
 readme = "README.md" # Assuming llmchat-web will have its own README
 requires-python = ">=3.11"

@@ -283,7 +283,9 @@ async def _stream_chat_responses_route_helper(llm_core_chat_params: Dict[str, An
 
     try:
         # LLMCore.chat with stream=True returns an AsyncGenerator[str, None]
-        async for chunk_content in llmcore_instance.chat(**call_params): # type: ignore
+        # CRITICAL FIX: await the call to llmcore_instance.chat to get the generator
+        response_generator = await llmcore_instance.chat(**call_params) # type: ignore
+        async for chunk_content in response_generator:
             yield f"data: {json.dumps({'type': 'chunk', 'content': chunk_content})}\n\n"
             await asyncio.sleep(0.01) # Small sleep to allow other tasks, if any
 
