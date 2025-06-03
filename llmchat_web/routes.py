@@ -26,15 +26,14 @@ from werkzeug.utils import secure_filename
 # Import shared components from .app (app.py)
 from .app import (
     main_bp,
-    app,
+    app, # Flask app instance, useful for some extensions or direct use if needed
     llmcore_instance,
     llmcore_init_error as global_llmcore_init_error,
-    # async_to_sync_in_flask, # No longer used on api_chat, but kept for others
-    async_to_sync_in_flask,
+    async_to_sync_in_flask, # Key wrapper for calling async code from sync routes
     get_context_usage_info,
     get_current_web_session_id,
     set_current_web_session_id,
-    logger as app_logger,
+    logger as app_logger, # Main app logger
     APP_VERSION
 )
 
@@ -283,10 +282,12 @@ async def _stream_chat_responses_route_helper(llm_core_chat_params: Dict[str, An
     # 'explicitly_staged_items' should already be resolved and in call_params by api_chat
 
     try:
-        async for chunk in llmcore_instance.chat_stream(**call_params):
-            yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-            await asyncio.sleep(0.01)
+        # LLMCore.chat with stream=True returns an AsyncGenerator[str, None]
+        async for chunk_content in llmcore_instance.chat(**call_params): # type: ignore
+            yield f"data: {json.dumps({'type': 'chunk', 'content': chunk_content})}\n\n"
+            await asyncio.sleep(0.01) # Small sleep to allow other tasks, if any
 
+        # After stream completion, fetch metadata
         session_id_for_meta = call_params.get("session_id")
         if session_id_for_meta:
             last_assistant_message_id = await _get_last_assistant_message_id(session_id_for_meta)
@@ -307,12 +308,51 @@ async def _stream_chat_responses_route_helper(llm_core_chat_params: Dict[str, An
         yield f"data: {json.dumps({'type': 'end'})}\n\n"
 
 
+# Helper to run an async generator synchronously for stream_with_context
+# This is needed when the route itself is synchronous (like default Flask with Gunicorn sync workers)
+def run_async_generator_synchronously(async_gen_func, *args, **kwargs):
+    """
+    Runs an asynchronous generator function synchronously.
+    Creates a new event loop to run the async generator and yields its items.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        async_gen = async_gen_func(*args, **kwargs)
+        while True:
+            try:
+                item = loop.run_until_complete(async_gen.__anext__())
+                yield item
+            except StopAsyncIteration:
+                break
+    finally:
+        logger.debug("Closing event loop for run_async_generator_synchronously.")
+        try:
+            async def _shutdown_loop_tasks(current_loop: asyncio.AbstractEventLoop):
+                tasks = [t for t in asyncio.all_tasks(loop=current_loop) if t is not asyncio.current_task(loop=current_loop)]
+                if tasks:
+                    logger.debug(f"Cancelling {len(tasks)} outstanding tasks in sync generator's loop.")
+                    for task in tasks: task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                logger.debug("Shutting down async generators in sync generator's loop.")
+                await current_loop.shutdown_asyncgens()
+            loop.run_until_complete(_shutdown_loop_tasks(loop))
+        except Exception as e_shutdown:
+            logger.error(f"Error during shutdown of tasks/asyncgens in sync generator's loop: {e_shutdown}")
+        finally:
+            loop.close()
+            logger.debug("Event loop for run_async_generator_synchronously closed.")
+            if asyncio.get_event_loop_policy().get_event_loop() is loop:
+                asyncio.set_event_loop(None)
+
+
 @main_bp.route("/api/chat", methods=["POST"])
-async def api_chat() -> Any: # Changed to async def
+def api_chat() -> Any: # Changed to sync def
     """
     Handles chat messages from the user.
     Supports streaming responses using Server-Sent Events (SSE).
     Reads RAG settings, LLM settings, and prompt template values from Flask session.
+    This route is now synchronous to work with Gunicorn's sync workers.
     """
     if not llmcore_instance:
         return jsonify({"error": "LLM service not available."}), 503
@@ -324,17 +364,16 @@ async def api_chat() -> Any: # Changed to async def
     user_message_content = data["message"]
     session_id_from_request = data.get("session_id", get_current_web_session_id())
     stream_requested = data.get("stream", True)
-
     active_context_spec_from_js = data.get('active_context_specification', [])
 
     try:
-        explicitly_staged_items = await _resolve_staged_items_for_core(
+        # Call async helper synchronously
+        explicitly_staged_items = async_to_sync_in_flask(_resolve_staged_items_for_core)(
             active_context_spec_from_js, session_id_from_request
         )
     except Exception as e_resolve_ctx:
         logger.error(f"Error resolving context items for chat: {e_resolve_ctx}", exc_info=True)
         return jsonify({"error": f"Failed to process context items: {str(e_resolve_ctx)}"}), 500
-
 
     logger.debug(
         f"Chat request for session '{session_id_from_request}'. "
@@ -362,15 +401,18 @@ async def api_chat() -> Any: # Changed to async def
 
     if stream_requested:
         llm_core_params["stream"] = True
-        # stream_with_context should work with an async generator if the route is async
-        return Response(stream_with_context(_stream_chat_responses_route_helper(llm_core_params)),
-                        content_type="text/event-stream")
+        # Use the synchronous generator wrapper for stream_with_context
+        sync_generator = run_async_generator_synchronously(_stream_chat_responses_route_helper, llm_core_params)
+        return Response(stream_with_context(sync_generator), content_type="text/event-stream")
     else:
         try:
             llm_core_params["stream"] = False
-            response_content_str = await llmcore_instance.chat(**llm_core_params) # type: ignore
-            last_msg_id = await _get_last_assistant_message_id(session_id_from_request)
-            ctx_usage = await get_context_usage_info(session_id_from_request)
+            # Call async LLMCore.chat synchronously
+            response_content_str = async_to_sync_in_flask(llmcore_instance.chat)(**llm_core_params) # type: ignore
+            # Call async helpers synchronously
+            last_msg_id = async_to_sync_in_flask(_get_last_assistant_message_id)(session_id_from_request)
+            ctx_usage = async_to_sync_in_flask(get_context_usage_info)(session_id_from_request)
+
             return jsonify({
                 "role": "assistant", "content": response_content_str,
                 "message_id": last_msg_id, "context_usage": ctx_usage
@@ -385,7 +427,7 @@ async def api_chat() -> Any: # Changed to async def
 
 # --- Session Management API Endpoints ---
 @main_bp.route("/api/sessions", methods=["GET"])
-@async_to_sync_in_flask # Keep for now, as list_sessions might be sync internally
+@async_to_sync_in_flask
 async def list_sessions_route():
     """Lists all available LLMCore sessions."""
     if not llmcore_instance: return jsonify({"error": "LLM service not available."}), 503
@@ -397,7 +439,7 @@ async def list_sessions_route():
         return jsonify({"error": f"Failed to list sessions: {str(e)}"}), 500
 
 @main_bp.route("/api/sessions/new", methods=["POST"])
-@async_to_sync_in_flask # Keep for now
+@async_to_sync_in_flask
 async def new_session_route():
     """Creates a new LLMCore session and sets it as current in Flask session, resetting relevant session variables."""
     if not llmcore_instance: return jsonify({"error": "LLM service not available."}), 503
@@ -419,10 +461,12 @@ async def new_session_route():
 
         logger.info(f"New web session initiated with ID: {new_llmcore_session_id}. RAG/LLM/Prompt settings reset to defaults.")
 
+        # Note: This endpoint does NOT create a persistent LLMCore session yet.
+        # It only prepares the Flask session. LLMCore session is created on first chat.
         return jsonify({
-            "id": new_llmcore_session_id,
-            "name": None,
-            "messages": [],
+            "id": new_llmcore_session_id, # This is the ID for the *next* LLMCore session
+            "name": None, # LLMCore session name, not yet set
+            "messages": [], # No messages in a new session context
             "rag_settings": {
                 "enabled": flask_session['rag_enabled'],
                 "collection_name": flask_session['rag_collection_name'],
@@ -436,21 +480,31 @@ async def new_session_route():
             },
             "prompt_template_values": flask_session['prompt_template_values'],
         }), 201
-    except LLMCoreError as e:
+    except LLMCoreError as e: # Catch broad LLMCore errors if config access fails
         logger.error(f"Error creating new session context: {e}", exc_info=True)
         return jsonify({"error": f"Failed to initialize new session context: {str(e)}"}), 500
 
 @main_bp.route("/api/sessions/<session_id_to_load>/load", methods=["GET"])
-@async_to_sync_in_flask # Keep for now
+@async_to_sync_in_flask
 async def load_session_route(session_id_to_load: str):
     """Loads an existing LLMCore session, sets it as current, and returns its details along with session-specific settings."""
     if not llmcore_instance: return jsonify({"error": "LLM service not available."}), 503
     try:
         session_obj = await llmcore_instance.get_session(session_id_to_load)
-        if not session_obj:
-            return jsonify({"error": "Session not found."}), 404
+        if not session_obj: # get_session might return a new empty session if ID not found.
+                           # We need to check if it actually loaded an *existing* one.
+                           # This check might need refinement based on get_session behavior.
+                           # If get_session *always* returns a session (new or existing),
+                           # we need a way to know if it was pre-existing.
+                           # For now, assume if messages are empty, it might be "newly created by get_session".
+                           # A better check: if session_obj.created_at == session_obj.updated_at and no messages.
+            # Check if it's truly not found or just empty new one
+            all_sessions_meta = await llmcore_instance.list_sessions()
+            if not any(s['id'] == session_id_to_load for s in all_sessions_meta):
+                 logger.warning(f"Session ID '{session_id_to_load}' not found in persistent storage during load attempt.")
+                 return jsonify({"error": "Session not found in persistent storage."}), 404
 
-        set_current_web_session_id(session_obj.id)
+        set_current_web_session_id(session_obj.id) # session_obj.id will be session_id_to_load
 
         session_metadata = session_obj.metadata or {}
         flask_session['rag_enabled'] = session_metadata.get('rag_enabled', False)
@@ -462,7 +516,7 @@ async def load_session_route(session_id_to_load: str):
             'rag_k_value',
             llmcore_instance.config.get("context_management.rag_retrieval_k", 3) if llmcore_instance.config else 3
         )
-        flask_session['rag_filter'] = session_metadata.get('rag_filter')
+        flask_session['rag_filter'] = session_metadata.get('rag_filter') # Expects dict or None
         flask_session['current_provider_name'] = session_metadata.get(
             'current_provider_name',
             llmcore_instance.config.get("llmcore.default_provider") if llmcore_instance.config else None
@@ -490,14 +544,14 @@ async def load_session_route(session_id_to_load: str):
                 "prompt_template_values": flask_session['prompt_template_values'],
             }
         })
-    except SessionNotFoundError:
+    except SessionNotFoundError: # Should be caught if get_session raises it for non-existent ID
         return jsonify({"error": "Session not found."}), 404
     except LLMCoreError as e:
         logger.error(f"Error loading session {session_id_to_load}: {e}", exc_info=True)
         return jsonify({"error": f"Failed to load session: {str(e)}"}), 500
 
 @main_bp.route("/api/sessions/<session_id_to_delete>", methods=["DELETE"])
-@async_to_sync_in_flask # Keep for now
+@async_to_sync_in_flask
 async def delete_session_route(session_id_to_delete: str):
     """Deletes an LLMCore session."""
     if not llmcore_instance: return jsonify({"error": "LLM service not available."}), 503
@@ -505,23 +559,25 @@ async def delete_session_route(session_id_to_delete: str):
         deleted = await llmcore_instance.delete_session(session_id_to_delete)
         if deleted:
             if get_current_web_session_id() == session_id_to_delete:
-                set_current_web_session_id(None)
+                set_current_web_session_id(None) # Clear from Flask session if it was current
                 logger.info(f"Deleted current session {session_id_to_delete}. Flask session ID cleared.")
             return jsonify({"message": f"Session '{session_id_to_delete}' deleted."})
         else:
-            return jsonify({"error": "Session not found or could not be deleted by LLMCore."}), 404
+            # delete_session returns True if found in either cache or persistent and deletion attempted.
+            # False means it was not found in persistent and not in transient cache.
+            return jsonify({"error": "Session not found or could not be deleted by LLMCore (already non-existent)."}), 404
     except LLMCoreError as e:
         logger.error(f"Error deleting session {session_id_to_delete}: {e}", exc_info=True)
         return jsonify({"error": f"Failed to delete session: {str(e)}"}), 500
 
 # --- Per-Message Action Endpoints ---
 @main_bp.route("/api/sessions/<session_id>/messages/<message_id>", methods=["DELETE"])
-@async_to_sync_in_flask # Keep for now
+@async_to_sync_in_flask
 async def delete_message_from_session_route(session_id: str, message_id: str):
     """Deletes a specific message from a session using LLMCore."""
     if not llmcore_instance: return jsonify({"error": "LLM service not available."}), 503
     try:
-        success = await llmcore_instance.delete_message_from_session(session_id, message_id)
+        success = await llmcore_instance.delete_message_from_session(session_id, message_id) # Assuming this method exists on LLMCore
         if success:
             return jsonify({"message": f"Message '{message_id}' deleted from session '{session_id}'."})
         else:
@@ -533,7 +589,7 @@ async def delete_message_from_session_route(session_id: str, message_id: str):
         return jsonify({"error": f"Failed to delete message: {str(e)}"}), 500
 
 @main_bp.route("/api/sessions/<session_id>/workspace/add_from_message", methods=["POST"])
-@async_to_sync_in_flask # Keep for now
+@async_to_sync_in_flask
 async def add_message_to_workspace_route(session_id: str):
     """Adds content of a message to the session's workspace items using LLMCore."""
     if not llmcore_instance: return jsonify({"error": "LLM service not available."}), 503
@@ -565,7 +621,7 @@ async def add_message_to_workspace_route(session_id: str):
 
 # --- Workspace (Session Context Item) Management API Endpoints ---
 @main_bp.route("/api/sessions/<session_id>/workspace/items", methods=["GET"])
-@async_to_sync_in_flask # Keep for now
+@async_to_sync_in_flask
 async def list_workspace_items_route(session_id: str):
     """Lists all workspace items for a given session using LLMCore."""
     if not llmcore_instance: return jsonify({"error": "LLM service not available."}), 503
@@ -579,7 +635,7 @@ async def list_workspace_items_route(session_id: str):
         return jsonify({"error": f"Failed to list workspace items: {str(e)}"}), 500
 
 @main_bp.route("/api/sessions/<session_id>/workspace/items/<item_id>", methods=["GET"])
-@async_to_sync_in_flask # Keep for now
+@async_to_sync_in_flask
 async def get_workspace_item_route(session_id: str, item_id: str):
     """Gets a specific workspace item by its ID using LLMCore."""
     if not llmcore_instance: return jsonify({"error": "LLM service not available."}), 503
@@ -596,7 +652,7 @@ async def get_workspace_item_route(session_id: str, item_id: str):
         return jsonify({"error": f"Failed to get workspace item: {str(e)}"}), 500
 
 @main_bp.route("/api/sessions/<session_id>/workspace/add_text", methods=["POST"])
-@async_to_sync_in_flask # Keep for now
+@async_to_sync_in_flask
 async def add_text_to_workspace_route(session_id: str):
     """Adds a text snippet as a workspace item using LLMCore."""
     if not llmcore_instance: return jsonify({"error": "LLM service not available."}), 503
@@ -614,7 +670,7 @@ async def add_text_to_workspace_route(session_id: str):
         return jsonify({"error": f"Failed to add text to workspace: {str(e)}"}), 500
 
 @main_bp.route("/api/sessions/<session_id>/workspace/add_file", methods=["POST"])
-@async_to_sync_in_flask # Keep for now
+@async_to_sync_in_flask
 async def add_file_to_workspace_route(session_id: str):
     """Adds a server-side file's content as a workspace item using LLMCore."""
     if not llmcore_instance: return jsonify({"error": "LLM service not available."}), 503
@@ -629,12 +685,12 @@ async def add_file_to_workspace_route(session_id: str):
         return jsonify({"error": f"File not found at server path: {file_path}"}), 404
     except SessionNotFoundError:
         return jsonify({"error": "Session not found."}), 404
-    except (LLMCoreError, StorageError) as e:
+    except (LLMCoreError, StorageError) as e: # StorageError if file reading fails internally
         logger.error(f"Error adding file to workspace for session {session_id}: {e}", exc_info=True)
         return jsonify({"error": f"Failed to add file to workspace: {str(e)}"}), 500
 
 @main_bp.route("/api/sessions/<session_id>/workspace/items/<item_id>", methods=["DELETE"])
-@async_to_sync_in_flask # Keep for now
+@async_to_sync_in_flask
 async def remove_workspace_item_route(session_id: str, item_id: str):
     """Removes a workspace item by its ID using LLMCore."""
     if not llmcore_instance: return jsonify({"error": "LLM service not available."}), 503
@@ -652,7 +708,7 @@ async def remove_workspace_item_route(session_id: str, item_id: str):
 
 # --- Context Preview API Endpoint ---
 @main_bp.route("/api/sessions/<session_id>/context/preview", methods=["POST"])
-@async_to_sync_in_flask # Keep for now
+@async_to_sync_in_flask
 async def preview_context_route(session_id: str):
     """Previews the context that would be sent to the LLM using LLMCore."""
     if not llmcore_instance: return jsonify({"error": "LLM service not available."}), 503
@@ -666,7 +722,7 @@ async def preview_context_route(session_id: str):
         )
 
         preview_details_dict = await llmcore_instance.preview_context_for_chat(
-            current_user_query=current_query or "",
+            current_user_query=current_query or "", # Must be a string
             session_id=session_id,
             system_message=flask_session.get('system_message'),
             provider_name=flask_session.get('current_provider_name'),
@@ -678,7 +734,7 @@ async def preview_context_route(session_id: str):
             rag_metadata_filter=flask_session.get('rag_filter'),
             prompt_template_values=flask_session.get('prompt_template_values', {})
         )
-        return jsonify(preview_details_dict)
+        return jsonify(preview_details_dict) # Already a dict from model_dump
     except SessionNotFoundError:
         return jsonify({"error": "Session not found."}), 404
     except LLMCoreError as e:
@@ -691,7 +747,7 @@ async def preview_context_route(session_id: str):
 
 # --- RAG Settings and Search API Endpoints ---
 @main_bp.route("/api/rag/collections", methods=["GET"])
-@async_to_sync_in_flask # Keep for now
+@async_to_sync_in_flask
 async def get_rag_collections_route():
     """Lists available RAG collections from LLMCore."""
     if not llmcore_instance: return jsonify({"error": "LLM service not available."}), 503
@@ -701,10 +757,10 @@ async def get_rag_collections_route():
     except VectorStorageError as e_vs:
         logger.error(f"VectorStorageError listing RAG collections: {e_vs}", exc_info=True)
         return jsonify({"error": f"Failed to access RAG collections storage: {str(e_vs)}"}), 500
-    except LLMCoreError as e:
+    except LLMCoreError as e: # Broader LLMCore error if list_rag_collections itself fails for other reasons
         logger.error(f"Error listing RAG collections: {e}", exc_info=True)
         return jsonify({"error": f"Failed to list RAG collections: {str(e)}"}), 500
-    except Exception as e_unexp:
+    except Exception as e_unexp: # Catch-all for truly unexpected issues
         logger.error(f"Unexpected error listing RAG collections: {e_unexp}", exc_info=True)
         return jsonify({"error": "An unexpected server error occurred while listing RAG collections."}), 500
 
@@ -719,11 +775,12 @@ def update_rag_settings_route():
     flask_session['rag_collection_name'] = data.get('collectionName', flask_session.get('rag_collection_name'))
     flask_session['rag_k_value'] = data.get('kValue', flask_session.get('rag_k_value', 3))
 
-    filter_input = data.get('filter')
-    if isinstance(filter_input, dict) and filter_input:
+    filter_input = data.get('filter') # This comes from JSON.stringify on client, or is null
+    if isinstance(filter_input, dict) and filter_input: # If it's already a non-empty dict
         flask_session['rag_filter'] = filter_input
-    elif filter_input is None or (isinstance(filter_input, dict) and not filter_input) :
+    elif filter_input is None or (isinstance(filter_input, dict) and not filter_input) : # Explicitly null or empty dict
         flask_session['rag_filter'] = None
+    # No need to parse from string here, as client sends object or null
     else:
         logger.warning(f"Received RAG filter of unexpected type or structure: {filter_input}. Storing None.")
         flask_session['rag_filter'] = None
@@ -744,7 +801,7 @@ def update_rag_settings_route():
     })
 
 @main_bp.route("/api/rag/direct_search", methods=["POST"])
-@async_to_sync_in_flask # Keep for now
+@async_to_sync_in_flask
 async def direct_rag_search_route():
     """Performs a direct RAG search using LLMCore."""
     if not llmcore_instance:
@@ -757,9 +814,10 @@ async def direct_rag_search_route():
     query = data["query"]
     collection_name = data.get("collection_name", flask_session.get('rag_collection_name'))
     k_value = data.get("k", flask_session.get('rag_k_value', 3))
-    metadata_filter = data.get("filter", flask_session.get('rag_filter'))
+    metadata_filter = data.get("filter", flask_session.get('rag_filter')) # Expects dict or null
 
     if not collection_name:
+        # Try to get LLMCore's configured default if not in session or request
         default_llmcore_collection = llmcore_instance.config.get("storage.vector.default_collection") if llmcore_instance.config else None
         if not default_llmcore_collection:
              return jsonify({"error": "No RAG collection specified and no default LLMCore collection configured."}), 400
@@ -771,26 +829,26 @@ async def direct_rag_search_route():
     try:
         search_results: List[LLMCoreContextDocument] = await llmcore_instance.search_vector_store(
             query=query,
+            k=int(k_value), # Ensure k is int
             collection_name=collection_name,
-            k=int(k_value),
-            metadata_filter=metadata_filter
+            filter_metadata=metadata_filter # Pass filter as is (dict or None)
         )
         results_dict_list = [doc.model_dump(mode="json") for doc in search_results]
         return jsonify(results_dict_list)
     except (VectorStorageError, LLMCoreError) as e:
         logger.error(f"Error during direct RAG search: {e}", exc_info=True)
         return jsonify({"error": f"Direct RAG search failed: {str(e)}"}), 500
-    except ValueError as ve:
+    except ValueError as ve: # For int(k_value)
         logger.error(f"Invalid K value for direct RAG search: {k_value} - {ve}", exc_info=True)
         return jsonify({"error": f"Invalid K value for search: {str(ve)}"}), 400
-    except Exception as e:
+    except Exception as e: # Catch-all for other unexpected errors
         logger.error(f"Unexpected error during direct RAG search: {e}", exc_info=True)
         return jsonify({"error": "An unexpected server error occurred during RAG search."}), 500
 
 
 # --- LLM Settings API Endpoints ---
 @main_bp.route("/api/llm/providers", methods=["GET"])
-@async_to_sync_in_flask # Keep for now
+@async_to_sync_in_flask
 async def get_llm_providers_route():
     """Lists available LLM providers from LLMCore."""
     if not llmcore_instance: return jsonify({"error": "LLM service not available."}), 503
@@ -802,14 +860,14 @@ async def get_llm_providers_route():
         return jsonify({"error": f"Failed to list LLM providers: {str(e)}"}), 500
 
 @main_bp.route("/api/llm/providers/<provider_name>/models", methods=["GET"])
-@async_to_sync_in_flask # Keep for now
+@async_to_sync_in_flask
 async def get_llm_models_route(provider_name: str):
     """Lists models for a specific LLM provider from LLMCore."""
     if not llmcore_instance: return jsonify({"error": "LLM service not available."}), 503
     try:
         models = llmcore_instance.get_models_for_provider(provider_name)
         return jsonify(models)
-    except LLMCoreError as e:
+    except LLMCoreError as e: # Catch ConfigError or ProviderError from get_models_for_provider
         logger.error(f"Error listing models for provider {provider_name}: {e}", exc_info=True)
         return jsonify({"error": f"Failed to list models for provider '{provider_name}': {str(e)}"}), 500
 
@@ -820,17 +878,20 @@ def update_llm_settings_route():
     if not data: return jsonify({"error": "No data provided."}), 400
 
     new_provider_name = data.get('provider_name')
-    new_model_name = data.get('model_name')
+    new_model_name = data.get('model_name') # Can be empty string or null from JS
 
     if new_provider_name:
         flask_session['current_provider_name'] = new_provider_name
+        # If new_model_name is empty string or null, set Flask session to None
+        # so that the default model for the new provider is picked up later if needed.
         flask_session['current_model_name'] = new_model_name if new_model_name else None
         logger.info(f"Flask session LLM settings updated: Provider={new_provider_name}, Model={flask_session['current_model_name']}")
 
+        # If model became None after update, try to set to provider's default
         if flask_session['current_model_name'] is None and llmcore_instance and llmcore_instance.config:
             provider_default_model = llmcore_instance.config.get(f"providers.{new_provider_name}.default_model")
             flask_session['current_model_name'] = provider_default_model
-            logger.info(f"Model was empty, set to default for '{new_provider_name}': {provider_default_model}")
+            logger.info(f"Model was empty for '{new_provider_name}', set to provider's default: {provider_default_model}")
 
         return jsonify({
             "message": "LLM settings updated in session.",
@@ -853,10 +914,10 @@ def get_system_message_route():
 def update_system_message_route():
     """Updates the system message in the Flask session."""
     data = request.json
-    new_system_message = data.get('system_message', "") if data else ""
+    new_system_message = data.get('system_message', "") if data else "" # Default to empty string if no data or key
 
     flask_session['system_message'] = new_system_message
-    flask_session.modified = True
+    flask_session.modified = True # Ensure session is saved if only this changed
     logger.info(f"Flask session system_message updated: '{new_system_message[:100]}...'")
     return jsonify({
         "message": "System message updated in session.",
@@ -874,11 +935,11 @@ def get_prompt_template_values_route():
 def update_prompt_template_value_route():
     """Adds or updates a single key-value pair for RAG prompt templates in Flask session."""
     data = request.json
-    if not data or "key" not in data or "value" not in data:
+    if not data or "key" not in data or "value" not in data: # Check for presence of key and value
         return jsonify({"error": "Missing 'key' or 'value' for prompt template update."}), 400
 
-    key = str(data["key"])
-    value = str(data["value"])
+    key = str(data["key"]) # Ensure key is string
+    value = str(data["value"]) # Ensure value is string
 
     if 'prompt_template_values' not in flask_session or not isinstance(flask_session['prompt_template_values'], dict):
         flask_session['prompt_template_values'] = {}
@@ -895,7 +956,7 @@ def delete_prompt_template_value_route():
     if not data or "key" not in data:
         return jsonify({"error": "Missing 'key' for prompt template value deletion."}), 400
 
-    key_to_delete = str(data["key"])
+    key_to_delete = str(data["key"]) # Ensure key is string
     if 'prompt_template_values' in flask_session and isinstance(flask_session['prompt_template_values'], dict):
         if key_to_delete in flask_session['prompt_template_values']:
             del flask_session['prompt_template_values'][key_to_delete]
@@ -931,10 +992,11 @@ def _get_apykatu_config_for_ingestion(collection_name_override: str) -> Optional
     apykatu_settings_from_llmcore: Dict[str, Any]
     if not isinstance(apykatu_settings_from_llmcore_raw, dict):
         try:
+            # If it's a Confy sub-config object, convert to dict
             apykatu_settings_from_llmcore = apykatu_settings_from_llmcore_raw.as_dict()
         except AttributeError:
             logger.error(f"LLMCore's 'apykatu' config section is not a dictionary or Confy object. Type: {type(apykatu_settings_from_llmcore_raw)}")
-            apykatu_settings_from_llmcore = {}
+            apykatu_settings_from_llmcore = {} # Fallback to empty dict
     else:
         apykatu_settings_from_llmcore = apykatu_settings_from_llmcore_raw
 
@@ -942,11 +1004,14 @@ def _get_apykatu_config_for_ingestion(collection_name_override: str) -> Optional
     logger.debug(f"Apykatu settings from LLMCore for ingestion: {apykatu_settings_from_llmcore}")
 
     try:
+        # Assuming Apykatu has a way to load config from a dictionary or apply overrides
+        # This part depends heavily on Apykatu's config loading mechanism
         from apykatu.config.confy_loader import load_app_config_with_confy as load_apykatu_config
 
+        # Load Apykatu's own defaults first, then apply LLMCore's overrides
         final_apykatu_config_tuple = load_apykatu_config(
-            cli_config_file_path=None,
-            cli_overrides=apykatu_settings_from_llmcore
+            cli_config_file_path=None, # Apykatu won't load its own file
+            cli_overrides=apykatu_settings_from_llmcore # Apply LLMCore's apykatu section
         )
         final_apykatu_config: ApykatuAppConfig = final_apykatu_config_tuple[0] # type: ignore
 
@@ -957,13 +1022,14 @@ def _get_apykatu_config_for_ingestion(collection_name_override: str) -> Optional
         logger.error(f"Unexpected error loading Apykatu config: {e}", exc_info=True)
         return None
 
+    # Override DB path and collection name from LLMCore's main vector store config
     llmcore_vector_db_path = llmcore_instance.config.get("storage.vector.path")
     if llmcore_vector_db_path:
         final_apykatu_config.database.path = Path(llmcore_vector_db_path).expanduser().resolve()
     else:
-        logger.warning("LLMCore's storage.vector.path is not set. Apykatu will use its default DB path if not overridden elsewhere.")
+        logger.warning("LLMCore's storage.vector.path is not set. Apykatu will use its default DB path if not overridden elsewhere in its own config.")
 
-    final_apykatu_config.database.collection_name = collection_name_override
+    final_apykatu_config.database.collection_name = collection_name_override # Crucial override
     logger.info(f"Apykatu config prepared for ingestion. Collection: '{collection_name_override}', DB Path: '{final_apykatu_config.database.path}'")
     return final_apykatu_config
 
@@ -995,7 +1061,7 @@ async def stream_file_ingestion_progress(uploaded_files: List[Any], collection_n
                 overall_files_with_errors +=1
                 all_error_messages.append(f"File {i+1}: {file_error_msg}")
                 yield f"data: {json.dumps({'type': 'file_end', 'filename': 'N/A', 'file_index': i, 'total_files': total_files, 'status': 'error', 'error_message': file_error_msg, 'chunks_added': 0})}\n\n"
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.01) # Ensure message is sent
                 continue
 
             filename = secure_filename(uploaded_file_storage.filename)
@@ -1003,9 +1069,10 @@ async def stream_file_ingestion_progress(uploaded_files: List[Any], collection_n
             await asyncio.sleep(0.01)
 
             temp_file_path = temp_dir / filename
-            uploaded_file_storage.save(temp_file_path)
+            uploaded_file_storage.save(str(temp_file_path)) # Ensure path is string
             logger.info(f"Processing uploaded file ({i+1}/{total_files}): {filename} for collection '{collection_name}'")
 
+            # Call Apykatu's API to process the file
             processed_chunks, api_stats_obj = await apykatu_process_file_path_api( # type: ignore
                 file_path=temp_file_path, config=apykatu_cfg, generate_embeddings=True
             )
@@ -1016,20 +1083,30 @@ async def stream_file_ingestion_progress(uploaded_files: List[Any], collection_n
                 all_error_messages.extend([f"File '{filename}': {e}" for e in api_stats_obj.error_messages]) # type: ignore
                 overall_files_with_errors +=1
             else:
-                if processed_chunks:
+                if processed_chunks: # type: ignore
+                    # Convert ApykatuProcessedChunk to LLMCore's expected format for add_documents_to_vector_store
                     docs_for_llmcore = []
                     for pc in processed_chunks: # type: ignore
-                        if pc.embedding_data and pc.embedding_data.get("vector"):
-                            meta_to_store = pc.metadata_from_apykatu.model_dump() if hasattr(pc.metadata_from_apykatu, 'model_dump') else pc.metadata_from_apykatu
+                        # Ensure embedding data is present and correct
+                        if pc.embedding_data and pc.embedding_data.get("vector"): # type: ignore
+                            # Adapt metadata as needed. Apykatu's metadata_from_apykatu might be a Pydantic model.
+                            meta_to_store = pc.metadata_from_apykatu.model_dump() if hasattr(pc.metadata_from_apykatu, 'model_dump') else pc.metadata_from_apykatu # type: ignore
                             docs_for_llmcore.append({
-                                "id": pc.semantiscan_chunk_id, "content": pc.content_text,
-                                "embedding": pc.embedding_data["vector"], "metadata": meta_to_store
+                                "id": pc.semantiscan_chunk_id, # type: ignore
+                                "content": pc.content_text, # type: ignore
+                                "embedding": pc.embedding_data["vector"], # type: ignore
+                                "metadata": meta_to_store
                             })
                         else:
-                            logger.warning(f"Chunk {pc.semantiscan_chunk_id} from file '{filename}' missing embedding. Skipping.")
+                            logger.warning(f"Chunk {pc.semantiscan_chunk_id} from file '{filename}' missing embedding. Skipping.") # type: ignore
+
                     if docs_for_llmcore:
+                        # Use LLMCore's method to add to its configured vector store
+                        # This assumes Apykatu's config for DB path/collection was aligned with LLMCore's
+                        # by _get_apykatu_config_for_ingestion.
                         added_ids = await llmcore_instance.add_documents_to_vector_store(
-                            documents=docs_for_llmcore, collection_name=collection_name # type: ignore
+                            documents=docs_for_llmcore, # type: ignore
+                            collection_name=collection_name # Use the target collection name
                         )
                         chunks_this_file = len(added_ids)
                         overall_chunks_added += chunks_this_file
@@ -1038,12 +1115,12 @@ async def stream_file_ingestion_progress(uploaded_files: List[Any], collection_n
                     else:
                         file_status = "warning_no_chunks"
                         file_error_msg = "No processable chunks with embeddings found."
-                        overall_files_with_errors +=1
+                        overall_files_with_errors +=1 # Count as error if no chunks added
                         all_error_messages.append(f"File '{filename}': {file_error_msg}")
-                else:
+                else: # No chunks produced by Apykatu
                     file_status = "warning_no_chunks"
                     file_error_msg = "Apykatu processed the file but produced no chunks."
-                    overall_files_with_errors +=1
+                    overall_files_with_errors +=1 # Count as error
                     all_error_messages.append(f"File '{filename}': {file_error_msg}")
 
             yield f"data: {json.dumps({'type': 'file_end', 'filename': filename, 'file_index': i, 'total_files': total_files, 'status': file_status, 'chunks_added': chunks_this_file, 'error_message': file_error_msg})}\n\n"
@@ -1057,6 +1134,7 @@ async def stream_file_ingestion_progress(uploaded_files: List[Any], collection_n
             yield f"data: {json.dumps({'type': 'file_end', 'filename': filename, 'file_index': i, 'total_files': total_files, 'status': 'error', 'error_message': file_error_msg, 'chunks_added': 0})}\n\n"
             await asyncio.sleep(0.01)
 
+    # Final summary event
     summary_payload = {
         "total_files_submitted": total_files,
         "files_processed_successfully": overall_files_processed_successfully,
@@ -1064,7 +1142,7 @@ async def stream_file_ingestion_progress(uploaded_files: List[Any], collection_n
         "total_chunks_added_to_db": overall_chunks_added,
         "collection_name": collection_name,
         "error_messages": all_error_messages,
-        "status": "success" if overall_files_with_errors == 0 else "completed_with_errors"
+        "status": "success" if overall_files_with_errors == 0 and total_files > 0 else "completed_with_errors" if total_files > 0 else "no_files_processed"
     }
     yield f"data: {json.dumps({'type': 'ingestion_complete', 'summary': summary_payload})}\n\n"
     yield f"data: {json.dumps({'type': 'end'})}\n\n" # Ensure stream ends properly
@@ -1107,108 +1185,11 @@ def ingest_data_route() -> Response:
             yield f"data: {json.dumps({'type': 'end'})}\n\n"
         return Response(stream_with_context(error_stream_apykatu_cfg()), status=500, mimetype='text/event-stream')
 
-    # Wrapper to run async generator in a sync Flask route for SSE
-    # This is a common pattern to bridge asyncio generators with Flask's sync stream_with_context
-    def run_async_gen_in_thread(async_gen_func, *args, **kwargs):
-        q = asyncio.Queue() # Use asyncio.Queue for async context
-        loop = asyncio.new_event_loop()
-
-        async def producer_coro():
-            asyncio.set_event_loop(loop) # Set event loop for this async context
-            try:
-                async for item in async_gen_func(*args, **kwargs):
-                    await q.put(item)
-            except Exception as e_prod:
-                await q.put(e_prod)
-            finally:
-                await q.put(None)
-
-        def start_producer_thread():
-            try:
-                loop.run_until_complete(producer_coro())
-            finally:
-                loop.close()
-
-        thread = threading.Thread(target=start_producer_thread, daemon=True)
-        thread.start()
-
-        def sync_generator():
-            while True:
-                # Get item from queue; this part needs to be careful about blocking
-                # A better way for true sync iteration would involve a sync queue (like queue.Queue)
-                # and the producer thread putting into that.
-                # For simplicity here, assuming the async_gen_func yields strings quickly.
-                # This simplified bridge might still have issues with blocking if not careful.
-                # A more robust bridge might involve a sync queue.Queue.
-                try:
-                    # This is a simplified bridge; a proper one would use a sync queue
-                    # For now, let's assume the async generator yields strings.
-                    item = loop.call_soon_threadsafe(q.get_nowait) # This is not ideal for iteration
-                    # A better approach for Flask sync route:
-                    # The producer thread puts items into a standard queue.Queue
-                    # This sync_generator then gets from queue.Queue
-                    # This requires changing the producer to use queue.Queue.put
-                    # For now, this is a placeholder for a more robust bridge if needed.
-                    # The original run_async_gen_sync was more direct but managed its own loop.
-                    # Flask's stream_with_context expects a sync generator.
-                    # The most straightforward is to make the generator itself sync if possible,
-                    # or use Flask with an ASGI server for native async generator support.
-                    # Given the current setup, we'll stick to the pattern of running the async gen
-                    # and yielding its results. The key is how the loop is managed.
-
-                    # Reverting to a simpler, but potentially loop-blocking if not careful, approach:
-                    # This is effectively what stream_with_context would do if it could handle async directly
-                    # in a sync route. The `async_to_sync_in_flask` would manage the loop for the whole route.
-                    # The issue is that stream_with_context itself needs to iterate.
-                    # The previous run_async_gen_sync was more explicit about loop management for the generator.
-                    # Let's adapt that.
-                    # The run_async_gen_sync from previous turn is more suitable here.
-                    pass # Placeholder, will use the original run_async_gen_sync structure.
-
-                except asyncio.QueueEmpty: # type: ignore
-                    # This would happen if q.get_nowait is used and queue is empty
-                    # A proper sync queue with blocking get would be better.
-                    time.sleep(0.01) # Avoid busy-waiting
-                    continue
-                except Exception as e_sync_gen:
-                    #logger.error(f"Error in sync_generator bridge: {e_sync_gen}")
-                    break # Exit on error
-
-                # if item is None or isinstance(item, Exception):
-                #     if isinstance(item, Exception):
-                #         logger.error(f"Error from async generator via queue: {item}")
-                #     break
-                # yield item
-            # This simplified bridge is problematic. Let's use a structure similar to the original run_async_gen_sync.
-            # The key is that stream_with_context needs a *sync* generator.
-
-        # The run_async_gen_sync from the previous turn is more appropriate here.
-        # Let's reuse its logic.
-        pass # This function is being redefined below with the correct logic.
-
-
-    # This is the correct helper to run an async generator in a way that Flask's stream_with_context can use
-    def run_async_generator_synchronously(async_gen_func, *args, **kwargs):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        # temp_dir_for_cleanup is managed by the caller of this helper (ingest_data_route)
-
-        try:
-            async_gen = async_gen_func(*args, **kwargs)
-            while True:
-                try:
-                    event_str = loop.run_until_complete(async_gen.__anext__())
-                    yield event_str
-                except StopAsyncIteration:
-                    break
-        finally:
-            loop.close()
-            # asyncio.set_event_loop(None) # Avoids issues if another loop is set later by Flask/Werkzeug
-
+    # run_async_generator_synchronously is defined globally in this file now.
 
     if ingest_type == "file":
         uploaded_files = request.files.getlist("files[]")
-        if not uploaded_files or not any(f.filename for f in uploaded_files):
+        if not uploaded_files or not any(f.filename for f in uploaded_files): # Check if any file has a name
             def error_stream_no_files():
                 yield f"data: {json.dumps({'type': 'error', 'error': 'No files provided for file ingestion.'})}\n\n"
                 yield f"data: {json.dumps({'type': 'end'})}\n\n"
@@ -1231,7 +1212,7 @@ def ingest_data_route() -> Response:
 
     async def stream_other_ingestion_types_sse_async_gen() -> AsyncGenerator[str, None]:
         nonlocal collection_name # Ensure collection_name is accessible from outer scope
-        overall_status = "error"
+        overall_status = "error" # Default to error
         summary_message = "Ingestion type not fully implemented for detailed SSE progress yet."
         details: Dict[str, Any] = {"ingest_type": ingest_type}
 
@@ -1240,7 +1221,7 @@ def ingest_data_route() -> Response:
             temp_dir_other = Path(temp_dir_str)
             try:
                 yield f"data: {json.dumps({'type': 'ingestion_start', 'ingest_type': ingest_type, 'collection_name': collection_name})}\n\n"
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.01) # Ensure message is sent
 
                 if ingest_type == "dir_zip":
                     zip_file_storage = request.files.get("zip_file")
@@ -1250,20 +1231,22 @@ def ingest_data_route() -> Response:
 
                     filename = secure_filename(zip_file_storage.filename)
                     temp_zip_path = temp_dir_other / filename
-                    zip_file_storage.save(temp_zip_path)
+                    zip_file_storage.save(str(temp_zip_path)) # Ensure path is string
                     extracted_dir_path = temp_dir_other / "unzipped_content"
                     extracted_dir_path.mkdir()
                     with zipfile.ZipFile(temp_zip_path, 'r') as zip_ref:
                         zip_ref.extractall(extracted_dir_path)
                     logger.info(f"Extracted ZIP '{filename}' to '{extracted_dir_path}'. Starting Apykatu pipeline.")
+
                     pipeline = IngestionPipeline(config=apykatu_cfg, progress_context=None) # type: ignore
                     repo_name = request.form.get("repo_name", extracted_dir_path.name)
+                    # Apykatu's pipeline.run is async
                     await pipeline.run(repo_path=extracted_dir_path, repo_name=repo_name, git_ref="HEAD", mode='snapshot') # type: ignore
                     summary_message = f"Directory (ZIP) '{filename}' ingestion pipeline completed."
-                    overall_status = "success"
+                    overall_status = "success" # Assume success if pipeline.run doesn't raise
                     # These details would ideally come from Apykatu's pipeline.run if it provided them
-                    details['files_processed_successfully'] = "N/A (dir)"
-                    details['total_chunks_added_to_db'] = "N/A (dir)"
+                    details['files_processed_successfully'] = "N/A (dir)" # Placeholder
+                    details['total_chunks_added_to_db'] = "N/A (dir)" # Placeholder
 
 
                 elif ingest_type == "git":
@@ -1272,10 +1255,11 @@ def ingest_data_route() -> Response:
                         raise ImportError(summary_message)
                     git_url = request.form.get("git_url")
                     repo_name_for_git = request.form.get("repo_name")
-                    git_ref = request.form.get("git_ref") or "HEAD"
+                    git_ref = request.form.get("git_ref") or "HEAD" # Default to HEAD if not provided
                     if not git_url or not repo_name_for_git:
                         summary_message = "Missing Git URL or repository name."
                         raise ValueError(summary_message)
+
                     cloned_repo_path = temp_dir_other / repo_name_for_git
                     logger.info(f"Cloning Git repo from '{git_url}' (ref: {git_ref}) to '{cloned_repo_path}'")
                     # Git clone is synchronous, run in thread for async context
@@ -1296,22 +1280,24 @@ def ingest_data_route() -> Response:
             except Exception as e_other:
                 logger.error(f"Error during '{ingest_type}' ingestion stream: {e_other}", exc_info=True)
                 summary_message = str(e_other)
-                overall_status = "error"
+                overall_status = "error" # Ensure status is error
                 details['error_message'] = summary_message
             # No finally temp_dir_other_mgr.cleanup() needed due to 'with' statement
 
+            # Construct final summary payload
             final_summary_payload = {
                 "message": summary_message,
                 "status": overall_status,
                 "collection_name": collection_name,
                 "details": details,
-                "total_files_submitted": "N/A" if ingest_type != "file" else 0,
+                "total_files_submitted": "N/A" if ingest_type != "file" else 0, # Placeholder for non-file
                 "files_processed_successfully": details.get('files_processed_successfully', "N/A"),
-                "files_with_errors": details.get('files_with_errors', "N/A" if overall_status == "success" else "All"),
+                "files_with_errors": details.get('files_with_errors', "N/A" if overall_status == "success" else "All"), # Simplified
                 "total_chunks_added_to_db": details.get('total_chunks_added_to_db', "N/A"),
                 "error_messages": [details['error_message']] if 'error_message' in details else []
             }
             yield f"data: {json.dumps({'type': 'ingestion_complete', 'summary': final_summary_payload})}\n\n"
             yield f"data: {json.dumps({'type': 'end'})}\n\n"
 
+    # Use run_async_generator_synchronously for dir_zip and git types as well
     return Response(stream_with_context(run_async_generator_synchronously(stream_other_ingestion_types_sse_async_gen)), mimetype='text/event-stream')
