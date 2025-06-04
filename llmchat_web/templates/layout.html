@@ -25,8 +25,14 @@
 
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
         <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-        <!-- Ensure utils.js is loaded before custom.js -->
+        <!-- Ensure utils.js is loaded before other custom scripts -->
         <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+        <!-- session_api.js provides functions called by custom.js -->
+        <script src="{{ url_for('static', filename='js/session_api.js') }}"></script>
+        <!-- chat_ui.js provides chat interaction logic, called by custom.js -->
+        <script src="{{ url_for('static', filename='js/chat_ui.js') }}"></script>
+        <!-- rag_ui.js provides RAG UI logic -->
+        <script src="{{ url_for('static', filename='js/rag_ui.js') }}"></script>
         <script src="{{ url_for('static', filename='js/custom.js') }}"></script>
         {% block scripts_extra %}{% endblock %}
     </body>

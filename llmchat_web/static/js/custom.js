@@ -6,12 +6,13 @@
  * This file handles client-side logic, DOM manipulation, event handling,
  * AJAX calls to the Flask backend, session management,
  * workspace item management, active context specification,
- * RAG controls, data ingestion, LLM settings,
- * direct RAG search, prompt template values, and basic command tab interaction.
+ * data ingestion, LLM settings,
+ * prompt template values, and basic command tab interaction.
  *
  * Utility functions (escapeHtml, showToast) are in utils.js.
  * Session API call functions (apiFetchSessions, etc.) are in session_api.js.
  * Chat message UI and interaction logic (sendMessage, appendMessageToChat, initChatEventListeners) are in chat_ui.js.
+ * RAG UI logic (controls, API calls, search) is in rag_ui.js.
  */
 
 // Global variable to store the current LLMCore session ID for the web client
@@ -20,6 +21,7 @@ let currentLlmSessionId = null;
 let stagedContextItems = []; // Each item: {spec_item_id: 'actx_XYZ', type: 'text_content'|'file_content'|'workspace_item'|'message_history', id_ref?: 'actual_ws_or_msg_id', content?: 'text content', path?: 'file_path', no_truncate?: boolean }
 
 // Global state for RAG settings (mirrors Flask session, updated via API)
+// This object is accessed and potentially modified by rag_ui.js
 let currentRagSettings = {
   enabled: false,
   collectionName: null,
@@ -37,9 +39,10 @@ let currentLlmSettings = {
 // Global state for Prompt Template Values (mirrors Flask session, updated via API)
 let currentPromptTemplateValues = {}; // Object: { "key1": "value1", "key2": "value2" }
 
-// escapeHtml and showToast functions are now in utils.js and should be globally available.
+// escapeHtml and showToast functions are now in utils.js.
 // Session API functions are in session_api.js.
-// Chat UI functions (including sendMessage, appendMessageToChat, initChatEventListeners) are in chat_ui.js.
+// Chat UI functions are in chat_ui.js.
+// RAG UI functions are in rag_ui.js.
 
 /**
  * Fetches initial status from the backend and updates the UI and global state.
@@ -77,7 +80,7 @@ function fetchAndUpdateInitialStatus() {
           .addClass("bg-danger")
           .text("Error");
         if (status.llmcore_error) {
-          showToast("LLMCore Error", status.llmcore_error, "danger");
+          showToast("LLMCore Error", status.llmcore_error, "danger"); // from utils.js
         }
       }
 
@@ -101,8 +104,11 @@ function fetchAndUpdateInitialStatus() {
       currentRagSettings.collectionName = status.rag_collection_name;
       currentRagSettings.kValue = status.rag_k_value || 3;
       currentRagSettings.filter = status.rag_filter || null; // Expects dict or null
-      updateRagControlsState(); // Update UI elements based on new settings
-      fetchAndPopulateRagCollections(); // Refresh collection dropdown, which also sets selected
+      // Functions from rag_ui.js will be responsible for updating UI based on currentRagSettings
+      if (typeof updateRagControlsState === "function")
+        updateRagControlsState();
+      if (typeof fetchAndPopulateRagCollections === "function")
+        fetchAndPopulateRagCollections();
 
       // Update Prompt Template Values from /api/status
       currentPromptTemplateValues = status.prompt_template_values || {};
@@ -150,6 +156,7 @@ function fetchAndUpdateInitialStatus() {
         .addClass("bg-danger")
         .text("Error");
       showToast(
+        // from utils.js
         "Initialization Error",
         "Could not fetch initial server status. Some features may not work.",
         "danger",
@@ -434,145 +441,6 @@ function removeStagedContextItem(spec_item_id_to_remove) {
     `Removed staged item ${spec_item_id_to_remove}. Remaining:`,
     stagedContextItems,
   );
-}
-
-/**
- * Fetches available RAG collections and populates the dropdown.
- */
-function fetchAndPopulateRagCollections() {
-  console.log("Fetching RAG collections...");
-  $.ajax({
-    url: "/api/rag/collections",
-    type: "GET",
-    dataType: "json",
-    success: function (collections) {
-      const $select = $("#rag-collection-select");
-      $select
-        .empty()
-        .append('<option selected value="">Select Collection...</option>');
-      if (collections && collections.length > 0) {
-        collections.forEach(function (collection) {
-          const collectionName =
-            typeof collection === "string" ? collection : collection.name; // Adapt if API returns objects
-          const collectionId =
-            typeof collection === "string" ? collection : collection.id; // Adapt if API returns objects
-          $select.append(
-            $("<option>", {
-              value: collectionId,
-              text: escapeHtml(collectionName),
-            }),
-          );
-        });
-        if (currentRagSettings.collectionName) {
-          $select.val(currentRagSettings.collectionName);
-        }
-      } else {
-        $select.append(
-          '<option value="" disabled>No collections found</option>',
-        );
-      }
-    },
-    error: function (jqXHR, textStatus, errorThrown) {
-      console.error("Error fetching RAG collections:", textStatus, errorThrown);
-      $("#rag-collection-select")
-        .empty()
-        .append('<option value="" disabled>Error loading collections</option>');
-    },
-  });
-}
-
-/**
- * Updates the state of RAG controls in the UI based on currentRagSettings.
- */
-function updateRagControlsState() {
-  $("#rag-toggle-switch").prop("checked", currentRagSettings.enabled);
-  const controlsShouldBeDisabled = !currentRagSettings.enabled;
-  $("#rag-collection-select").prop("disabled", controlsShouldBeDisabled);
-  $("#rag-k-value")
-    .prop("disabled", controlsShouldBeDisabled)
-    .val(currentRagSettings.kValue || 3);
-  $("#rag-filter-input")
-    .prop("disabled", controlsShouldBeDisabled)
-    .val(
-      currentRagSettings.filter &&
-        Object.keys(currentRagSettings.filter).length > 0
-        ? JSON.stringify(currentRagSettings.filter)
-        : "",
-    ); // Display filter as JSON string
-
-  const $ragStatusEl = $("#status-rag");
-  if (currentRagSettings.enabled) {
-    let statusText = `ON (${escapeHtml(currentRagSettings.collectionName) || "Default"}, K:${currentRagSettings.kValue || "Def"})`;
-    if (
-      currentRagSettings.filter &&
-      Object.keys(currentRagSettings.filter).length > 0
-    ) {
-      statusText += " Filter*";
-    }
-    $ragStatusEl
-      .text(statusText)
-      .removeClass("bg-danger")
-      .addClass("bg-success");
-  } else {
-    $ragStatusEl.text("OFF").removeClass("bg-success").addClass("bg-danger");
-  }
-}
-
-/**
- * Sends updated RAG settings to the backend.
- */
-function sendRagSettingsUpdate() {
-  console.log("Sending RAG settings update to backend:", currentRagSettings);
-  let filterToSend = currentRagSettings.filter;
-  if (typeof filterToSend === "string" && filterToSend.trim() === "") {
-    filterToSend = null;
-  }
-
-  const payload = {
-    enabled: currentRagSettings.enabled,
-    collectionName: currentRagSettings.collectionName,
-    kValue: currentRagSettings.kValue,
-    filter: filterToSend,
-  };
-
-  $.ajax({
-    url: "/api/settings/rag/update",
-    type: "POST",
-    contentType: "application/json",
-    data: JSON.stringify(payload),
-    dataType: "json",
-    success: function (response) {
-      console.log("RAG settings updated successfully on backend:", response);
-      if (response && response.rag_settings) {
-        currentRagSettings = response.rag_settings;
-        // Ensure filter is stored as an object or null locally
-        if (typeof currentRagSettings.filter === "string") {
-          try {
-            currentRagSettings.filter = JSON.parse(currentRagSettings.filter);
-          } catch (e) {
-            console.warn(
-              "Could not parse filter string from backend, setting to null",
-              e,
-            );
-            currentRagSettings.filter = null;
-          }
-        }
-      }
-      updateRagControlsState();
-    },
-    error: function (jqXHR, textStatus, errorThrown) {
-      console.error(
-        "Error updating RAG settings on backend:",
-        textStatus,
-        errorThrown,
-      );
-      showToast(
-        "Error",
-        "Failed to update RAG settings on the server.",
-        "danger",
-      );
-    },
-  });
 }
 
 /**
@@ -881,101 +749,8 @@ function fetchAndDisplayPromptTemplateValues() {
 }
 
 /**
- * Handles the submission of the Direct RAG Search form.
- */
-function handleDirectRagSearch() {
-  const query = $("#direct-rag-search-query").val().trim();
-  if (!query) {
-    showToast(
-      "Error",
-      "Please enter a search query for Direct RAG Search.",
-      "danger",
-    );
-    return;
-  }
-  const payload = {
-    query: query,
-    collection_name: currentRagSettings.collectionName,
-    k: currentRagSettings.kValue,
-    filter: currentRagSettings.filter,
-  };
-
-  console.log("Performing Direct RAG Search with payload:", payload);
-  $("#directRagSearchResultsBody").html(
-    '<p class="text-muted">Searching...</p>',
-  );
-  var searchModal = new bootstrap.Modal(
-    document.getElementById("directRagSearchResultsModal"),
-  );
-  searchModal.show();
-
-  $.ajax({
-    url: "/api/rag/direct_search",
-    type: "POST",
-    contentType: "application/json",
-    data: JSON.stringify(payload),
-    dataType: "json",
-    success: function (results) {
-      console.log("Direct RAG Search results:", results);
-      renderDirectRagSearchResults(results);
-    },
-    error: function (jqXHR, textStatus, errorThrown) {
-      console.error("Direct RAG Search error:", textStatus, errorThrown);
-      const errorMsg = jqXHR.responseJSON
-        ? jqXHR.responseJSON.error
-        : "Failed to perform RAG search.";
-      $("#directRagSearchResultsBody").html(
-        `<p class="text-danger">Error: ${escapeHtml(errorMsg)}</p>`,
-      );
-      showToast("Error", `Direct RAG Search failed: ${errorMsg}`, "danger");
-    },
-  });
-}
-
-/**
- * Renders the results of a Direct RAG Search into the modal.
- * @param {Array} results - Array of document objects from the backend.
- */
-function renderDirectRagSearchResults(results) {
-  const $modalBody = $("#directRagSearchResultsBody").empty();
-  if (!results || results.length === 0) {
-    $modalBody.append(
-      '<p class="text-muted">No results found for your query.</p>',
-    );
-    return;
-  }
-
-  const $listGroup = $('<ul class="list-group list-group-flush"></ul>');
-  results.forEach(function (doc) {
-    const scoreDisplay =
-      doc.score !== null && doc.score !== undefined
-        ? `<strong>Score:</strong> ${doc.score.toFixed(4)}`
-        : "Score: N/A";
-    const metadataDisplay = doc.metadata
-      ? `<small class="text-muted d-block">Metadata: ${escapeHtml(JSON.stringify(doc.metadata).substring(0, 100))}...</small>`
-      : "";
-    const contentPreview = doc.content
-      ? `<pre>${escapeHtml(doc.content.substring(0, 250))}${doc.content.length > 250 ? "..." : ""}</pre>`
-      : '<p class="text-muted small">No content preview.</p>';
-
-    const $listItem = $(`
-            <li class="list-group-item">
-                <div><strong>ID:</strong> ${escapeHtml(doc.id)}</div>
-                <div>${scoreDisplay}</div>
-                ${metadataDisplay}
-                <div class="mt-1">Content Preview:</div>
-                ${contentPreview}
-            </li>
-        `);
-    $listGroup.append($listItem);
-  });
-  $modalBody.append($listGroup);
-}
-
-/**
  * Handles the submission of ingestion forms.
- * For 'file' type, it now uses fetch for SSE.
- * For other types, it still uses AJAX (can be updated later).
+ * Uses fetch for SSE to stream progress.
  * @param {string} ingestType - The type of ingestion ('file', 'dir_zip', 'git').
  * @param {FormData} formData - The form data to submit.
  */
@@ -995,199 +770,186 @@ async function handleIngestionFormSubmit(ingestType, formData) {
     .attr("aria-valuenow", 0)
     .text("Starting...");
 
-  if (
-    ingestType === "file" ||
-    ingestType === "dir_zip" ||
-    ingestType === "git"
-  ) {
-    // Make all types use SSE
-    try {
-      const response = await fetch("/api/ingest", {
-        method: "POST",
-        body: formData,
-        // No 'Content-Type' header for FormData, browser sets it with boundary
-      });
+  // All ingestion types use SSE
+  try {
+    const response = await fetch("/api/ingest", {
+      method: "POST",
+      body: formData,
+      // No 'Content-Type' header for FormData, browser sets it with boundary
+    });
 
-      if (!response.ok) {
-        let errorText = `Server error: ${response.status} ${response.statusText}`;
-        try {
-          const errorData = await response.json();
-          errorText = errorData.error || errorText;
-        } catch (e) {
-          /* Ignore if response is not JSON */
-        }
-        throw new Error(errorText);
+    if (!response.ok) {
+      let errorText = `Server error: ${response.status} ${response.statusText}`;
+      try {
+        const errorData = await response.json();
+        errorText = errorData.error || errorText;
+      } catch (e) {
+        /* Ignore if response is not JSON */
       }
-
-      if (!response.body) {
-        throw new Error("Response body is null, cannot read stream.");
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let filesProcessedInStream = 0;
-      let totalFilesFromEvent = 0;
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) {
-          console.log("Ingestion stream finished by server.");
-          // Final update might come from 'ingestion_complete' event
-          if (
-            $progressBar.text() !== "Complete!" &&
-            $progressBar.text() !== "Failed!" &&
-            $progressBar.text() !== "Completed with Errors!" // Added this check
-          ) {
-            $progressBar
-              .css("width", "100%")
-              .addClass("bg-warning")
-              .text("Stream ended, awaiting summary...");
-          }
-          break;
-        }
-        buffer += decoder.decode(value, { stream: true });
-
-        let eolIndex;
-        while ((eolIndex = buffer.indexOf("\n\n")) >= 0) {
-          const line = buffer.substring(0, eolIndex).trim();
-          buffer = buffer.substring(eolIndex + 2);
-
-          if (line.startsWith("data: ")) {
-            try {
-              const eventData = JSON.parse(line.substring(6));
-              console.log("SSE Event:", eventData);
-
-              if (eventData.type === "file_start") {
-                totalFilesFromEvent =
-                  eventData.total_files || totalFilesFromEvent; // Update total if provided
-                $resultMsg.html(
-                  `Processing file <strong>${escapeHtml(eventData.filename)}</strong> (${eventData.file_index + 1} of ${totalFilesFromEvent})...`,
-                );
-                $progressBar.text(
-                  `File ${eventData.file_index + 1}/${totalFilesFromEvent}`,
-                );
-              } else if (eventData.type === "file_end") {
-                filesProcessedInStream++;
-                const progressPercent =
-                  totalFilesFromEvent > 0
-                    ? (filesProcessedInStream / totalFilesFromEvent) * 100
-                    : 50;
-                $progressBar
-                  .css("width", `${progressPercent}%`)
-                  .attr("aria-valuenow", progressPercent);
-                if (eventData.status === "success") {
-                  $resultMsg.append(
-                    `<br><small class="text-success">- File <strong>${escapeHtml(eventData.filename)}</strong> processed successfully. Chunks added: ${eventData.chunks_added || 0}</small>`,
-                  );
-                } else {
-                  $resultMsg.append(
-                    `<br><small class="text-danger">- File <strong>${escapeHtml(eventData.filename)}</strong> failed: ${escapeHtml(eventData.error_message || "Unknown error")}</small>`,
-                  );
-                  $progressBar.addClass("bg-warning"); // Mark progress as having issues
-                }
-              } else if (eventData.type === "ingestion_start") {
-                // For dir_zip and git
-                $resultMsg.html(
-                  `Starting ingestion for <strong>${escapeHtml(eventData.ingest_type)}</strong> into collection <strong>${escapeHtml(eventData.collection_name)}</strong>...`,
-                );
-                $progressBar
-                  .css("width", `25%`)
-                  .attr("aria-valuenow", 25)
-                  .text("Processing...");
-              } else if (eventData.type === "ingestion_complete") {
-                const summary = eventData.summary;
-                $progressBar.css("width", "100%").attr("aria-valuenow", 100);
-                if (
-                  summary.status === "success" ||
-                  (summary.files_with_errors !== undefined &&
-                    summary.files_with_errors === 0)
-                ) {
-                  $progressBar.addClass("bg-success").text("Complete!");
-                  $resultMsg
-                    .removeClass("text-muted text-danger")
-                    .addClass("text-success")
-                    .html(`<strong>Success!</strong> ${escapeHtml(summary.message) || "Ingestion completed."}<br>
-                                               Total Files Submitted: ${summary.total_files_submitted || "N/A"}<br>
-                                               Files Processed Successfully: ${summary.files_processed_successfully || "N/A"}<br>
-                                               Files With Errors: ${summary.files_with_errors || 0}<br>
-                                               Total Chunks Added: ${summary.total_chunks_added_to_db || 0}<br>
-                                               Target Collection: ${escapeHtml(summary.collection_name)}`);
-                } else {
-                  $progressBar
-                    .addClass("bg-danger")
-                    .text("Completed with Errors!");
-                  let errorDetailsHtml = "";
-                  if (
-                    summary.error_messages &&
-                    summary.error_messages.length > 0
-                  ) {
-                    errorDetailsHtml = "<br>Details:<ul>";
-                    summary.error_messages.forEach((err) => {
-                      errorDetailsHtml += `<li><small>${escapeHtml(err)}</small></li>`;
-                    });
-                    errorDetailsHtml += "</ul>";
-                  }
-                  $resultMsg
-                    .removeClass("text-muted text-success")
-                    .addClass("text-danger")
-                    .html(`<strong>Ingestion Completed with Errors!</strong> ${escapeHtml(summary.message) || ""}<br>
-                                               Total Files Submitted: ${summary.total_files_submitted || "N/A"}<br>
-                                               Files With Errors: ${summary.files_with_errors || "N/A"}<br>
-                                               Total Chunks Added: ${summary.total_chunks_added_to_db || 0}
-                                               ${errorDetailsHtml}`);
-                }
-                fetchAndPopulateRagCollections(); // Refresh collections list
-                setTimeout(() => $progressContainer.fadeOut(), 3000); // Increased timeout
-              } else if (eventData.type === "error") {
-                throw new Error(eventData.error); // Throw to be caught by outer catch
-              } else if (eventData.type === "end") {
-                console.log(
-                  "SSE stream 'end' event received from server for ingestion.",
-                );
-                if (
-                  $progressBar.text() !== "Complete!" &&
-                  $progressBar.text() !== "Completed with Errors!" &&
-                  $progressBar.text() !== "Failed!"
-                ) {
-                  $progressBar
-                    .css("width", "100%")
-                    .addClass("bg-warning")
-                    .text("Finished.");
-                  $resultMsg.append(
-                    "<br><small>Ingestion process ended.</small>",
-                  );
-                  setTimeout(() => $progressContainer.fadeOut(), 3000); // Increased timeout
-                }
-              }
-            } catch (e) {
-              console.warn(
-                "Error parsing SSE event data for ingestion:",
-                e,
-                "Line:",
-                line,
-              );
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error(`Ingestion error (Type: ${ingestType}):`, error);
-      $progressBar.css("width", "100%").addClass("bg-danger").text("Failed!");
-      $resultMsg
-        .removeClass("text-muted text-success")
-        .addClass("text-danger")
-        .html(
-          `<strong>Error!</strong> Failed to ingest data: ${escapeHtml(error.message)}`,
-        );
-      setTimeout(() => $progressContainer.fadeOut(), 3000); // Increased timeout
+      throw new Error(errorText);
     }
-  } else {
-    // This block should ideally not be reached if all types are SSE
-    console.warn(
-      `Ingest type ${ingestType} not configured for SSE, using AJAX fallback. (This should not happen)`,
-    );
-    // ... (original AJAX fallback, though it's better to ensure all types use SSE)
+
+    if (!response.body) {
+      throw new Error("Response body is null, cannot read stream.");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let filesProcessedInStream = 0;
+    let totalFilesFromEvent = 0;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        console.log("Ingestion stream finished by server.");
+        if (
+          $progressBar.text() !== "Complete!" &&
+          $progressBar.text() !== "Failed!" &&
+          $progressBar.text() !== "Completed with Errors!"
+        ) {
+          $progressBar
+            .css("width", "100%")
+            .addClass("bg-warning")
+            .text("Stream ended, awaiting summary...");
+        }
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+
+      let eolIndex;
+      while ((eolIndex = buffer.indexOf("\n\n")) >= 0) {
+        const line = buffer.substring(0, eolIndex).trim();
+        buffer = buffer.substring(eolIndex + 2);
+
+        if (line.startsWith("data: ")) {
+          try {
+            const eventData = JSON.parse(line.substring(6));
+            console.log("SSE Event:", eventData);
+
+            if (eventData.type === "file_start") {
+              totalFilesFromEvent =
+                eventData.total_files || totalFilesFromEvent;
+              $resultMsg.html(
+                `Processing file <strong>${escapeHtml(eventData.filename)}</strong> (${eventData.file_index + 1} of ${totalFilesFromEvent})...`,
+              );
+              $progressBar.text(
+                `File ${eventData.file_index + 1}/${totalFilesFromEvent}`,
+              );
+            } else if (eventData.type === "file_end") {
+              filesProcessedInStream++;
+              const progressPercent =
+                totalFilesFromEvent > 0
+                  ? (filesProcessedInStream / totalFilesFromEvent) * 100
+                  : 50;
+              $progressBar
+                .css("width", `${progressPercent}%`)
+                .attr("aria-valuenow", progressPercent);
+              if (eventData.status === "success") {
+                $resultMsg.append(
+                  `<br><small class="text-success">- File <strong>${escapeHtml(eventData.filename)}</strong> processed successfully. Chunks added: ${eventData.chunks_added || 0}</small>`,
+                );
+              } else {
+                $resultMsg.append(
+                  `<br><small class="text-danger">- File <strong>${escapeHtml(eventData.filename)}</strong> failed: ${escapeHtml(eventData.error_message || "Unknown error")}</small>`,
+                );
+                $progressBar.addClass("bg-warning");
+              }
+            } else if (eventData.type === "ingestion_start") {
+              $resultMsg.html(
+                `Starting ingestion for <strong>${escapeHtml(eventData.ingest_type)}</strong> into collection <strong>${escapeHtml(eventData.collection_name)}</strong>...`,
+              );
+              $progressBar
+                .css("width", `25%`)
+                .attr("aria-valuenow", 25)
+                .text("Processing...");
+            } else if (eventData.type === "ingestion_complete") {
+              const summary = eventData.summary;
+              $progressBar.css("width", "100%").attr("aria-valuenow", 100);
+              if (
+                summary.status === "success" ||
+                (summary.files_with_errors !== undefined &&
+                  summary.files_with_errors === 0)
+              ) {
+                $progressBar.addClass("bg-success").text("Complete!");
+                $resultMsg
+                  .removeClass("text-muted text-danger")
+                  .addClass("text-success")
+                  .html(`<strong>Success!</strong> ${escapeHtml(summary.message) || "Ingestion completed."}<br>
+                                             Total Files Submitted: ${summary.total_files_submitted || "N/A"}<br>
+                                             Files Processed Successfully: ${summary.files_processed_successfully || "N/A"}<br>
+                                             Files With Errors: ${summary.files_with_errors || 0}<br>
+                                             Total Chunks Added: ${summary.total_chunks_added_to_db || 0}<br>
+                                             Target Collection: ${escapeHtml(summary.collection_name)}`);
+              } else {
+                $progressBar
+                  .addClass("bg-danger")
+                  .text("Completed with Errors!");
+                let errorDetailsHtml = "";
+                if (
+                  summary.error_messages &&
+                  summary.error_messages.length > 0
+                ) {
+                  errorDetailsHtml = "<br>Details:<ul>";
+                  summary.error_messages.forEach((err) => {
+                    errorDetailsHtml += `<li><small>${escapeHtml(err)}</small></li>`;
+                  });
+                  errorDetailsHtml += "</ul>";
+                }
+                $resultMsg
+                  .removeClass("text-muted text-success")
+                  .addClass("text-danger")
+                  .html(`<strong>Ingestion Completed with Errors!</strong> ${escapeHtml(summary.message) || ""}<br>
+                                             Total Files Submitted: ${summary.total_files_submitted || "N/A"}<br>
+                                             Files With Errors: ${summary.files_with_errors || "N/A"}<br>
+                                             Total Chunks Added: ${summary.total_chunks_added_to_db || 0}
+                                             ${errorDetailsHtml}`);
+              }
+              if (typeof fetchAndPopulateRagCollections === "function")
+                fetchAndPopulateRagCollections();
+              setTimeout(() => $progressContainer.fadeOut(), 3000);
+            } else if (eventData.type === "error") {
+              throw new Error(eventData.error);
+            } else if (eventData.type === "end") {
+              console.log(
+                "SSE stream 'end' event received from server for ingestion.",
+              );
+              if (
+                $progressBar.text() !== "Complete!" &&
+                $progressBar.text() !== "Completed with Errors!" &&
+                $progressBar.text() !== "Failed!"
+              ) {
+                $progressBar
+                  .css("width", "100%")
+                  .addClass("bg-warning")
+                  .text("Finished.");
+                $resultMsg.append(
+                  "<br><small>Ingestion process ended.</small>",
+                );
+                setTimeout(() => $progressContainer.fadeOut(), 3000);
+              }
+            }
+          } catch (e) {
+            console.warn(
+              "Error parsing SSE event data for ingestion:",
+              e,
+              "Line:",
+              line,
+            );
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`Ingestion error (Type: ${ingestType}):`, error);
+    $progressBar.css("width", "100%").addClass("bg-danger").text("Failed!");
+    $resultMsg
+      .removeClass("text-muted text-success")
+      .addClass("text-danger")
+      .html(
+        `<strong>Error!</strong> Failed to ingest data: ${escapeHtml(error.message)}`,
+      );
+    setTimeout(() => $progressContainer.fadeOut(), 3000);
   }
 }
 
@@ -1201,7 +963,8 @@ $(document).ready(function () {
   }
 
   fetchAndUpdateInitialStatus();
-  initChatEventListeners(); // Initialize chat event listeners from chat_ui.js
+  if (typeof initChatEventListeners === "function") initChatEventListeners();
+  if (typeof initRagEventListeners === "function") initRagEventListeners();
 
   // --- Session Management Event Handlers (using session_api.js) ---
   $("#btn-new-session").on("click", function () {
@@ -1225,7 +988,8 @@ $(document).ready(function () {
             newSessionResponse.prompt_template_values;
 
         fetchAndDisplaySessions();
-        updateRagControlsState();
+        if (typeof updateRagControlsState === "function")
+          updateRagControlsState();
         fetchAndPopulateLlmProviders();
         fetchAndDisplaySystemMessage();
         renderPromptTemplateValuesTable();
@@ -1267,10 +1031,11 @@ $(document).ready(function () {
           loadedSessionData.messages &&
           loadedSessionData.messages.length > 0
         ) {
-          // Use appendMessageToChat from chat_ui.js for consistency,
-          // ensuring actions are added if persistentMessageId is provided.
           loadedSessionData.messages.forEach((msg) => {
-            appendMessageToChat(msg.content, msg.role, false, msg.id);
+            // Assuming appendMessageToChat is globally available from chat_ui.js
+            if (typeof appendMessageToChat === "function") {
+              appendMessageToChat(msg.content, msg.role, false, msg.id);
+            }
           });
         } else {
           $("#chat-messages").append(
@@ -1309,10 +1074,12 @@ $(document).ready(function () {
           $("#llm-model-select").val(currentLlmSettings.modelName);
         }
 
-        updateRagControlsState();
+        if (typeof updateRagControlsState === "function")
+          updateRagControlsState();
         if (
           $("#rag-collection-select").val() !==
-          currentRagSettings.collectionName
+            currentRagSettings.collectionName &&
+          typeof fetchAndPopulateRagCollections === "function"
         ) {
           fetchAndPopulateRagCollections();
         }
@@ -1718,67 +1485,6 @@ $(document).ready(function () {
     }
   }
 
-  // --- RAG Controls Event Handlers ---
-  $("#rag-tab-btn").on("shown.bs.tab", function () {
-    fetchAndPopulateRagCollections();
-    updateRagControlsState();
-  });
-  $("#rag-toggle-switch").on("change", function () {
-    currentRagSettings.enabled = $(this).is(":checked");
-    sendRagSettingsUpdate();
-  });
-  $("#rag-collection-select").on("change", function () {
-    currentRagSettings.collectionName = $(this).val() || null;
-    sendRagSettingsUpdate();
-  });
-  $("#rag-k-value").on("change", function () {
-    const val = parseInt($(this).val(), 10);
-    currentRagSettings.kValue = isNaN(val) ? 3 : val;
-    sendRagSettingsUpdate();
-  });
-  $("#rag-k-value").on("input", function () {}); // Keep for potential future live updates
-  $("#rag-filter-input").on("change", function () {
-    const filterStr = $(this).val().trim();
-    if (filterStr === "") {
-      currentRagSettings.filter = null;
-    } else {
-      try {
-        const parsedFilter = JSON.parse(filterStr);
-        if (typeof parsedFilter === "object" && parsedFilter !== null) {
-          currentRagSettings.filter = parsedFilter;
-        } else {
-          showToast(
-            "Error",
-            'Invalid JSON for RAG filter. It must be an object (e.g., {"key": "value"}).',
-            "danger",
-          );
-          $(this).val(
-            currentRagSettings.filter &&
-              Object.keys(currentRagSettings.filter).length > 0
-              ? JSON.stringify(currentRagSettings.filter)
-              : "",
-          );
-          return;
-        }
-      } catch (e) {
-        showToast("Error", "Invalid JSON format for RAG filter.", "danger");
-        $(this).val(
-          currentRagSettings.filter &&
-            Object.keys(currentRagSettings.filter).length > 0
-            ? JSON.stringify(currentRagSettings.filter)
-            : "",
-        );
-        return;
-      }
-    }
-    sendRagSettingsUpdate();
-  });
-
-  $("#direct-rag-search-form").on("submit", function (e) {
-    e.preventDefault();
-    handleDirectRagSearch();
-  });
-
   // --- Ingestion Event Handlers ---
   $("#btn-ingest-data").on("click", function () {
     var ingestionModal = new bootstrap.Modal(
@@ -1814,7 +1520,7 @@ $(document).ready(function () {
     for (let i = 0; i < files.length; i++) {
       formData.append("files[]", files[i]);
     }
-    handleIngestionFormSubmit("file", formData); // Will use fetch for SSE
+    handleIngestionFormSubmit("file", formData);
   });
 
   $("#form-ingest-dir").on("submit", function (e) {
@@ -1835,7 +1541,7 @@ $(document).ready(function () {
     formData.append("collection_name", collectionName);
     formData.append("zip_file", zipFile);
     if (repoName) formData.append("repo_name", repoName);
-    handleIngestionFormSubmit("dir_zip", formData); // Will use fetch for SSE
+    handleIngestionFormSubmit("dir_zip", formData);
   });
 
   $("#form-ingest-git").on("submit", function (e) {
@@ -1858,7 +1564,7 @@ $(document).ready(function () {
     formData.append("collection_name", collectionName);
     formData.append("repo_name", repoName);
     if (gitRef) formData.append("git_ref", gitRef);
-    handleIngestionFormSubmit("git", formData); // Will use fetch for SSE
+    handleIngestionFormSubmit("git", formData);
   });
 
   // --- Settings Tab Event Handlers ---
