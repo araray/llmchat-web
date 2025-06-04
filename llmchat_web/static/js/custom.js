@@ -8,6 +8,8 @@
  * per-message actions, workspace item management, active context specification,
  * RAG controls, data ingestion (now with SSE for files), LLM settings,
  * direct RAG search, prompt template values, and basic command tab interaction.
+ *
+ * Utility functions (escapeHtml, showToast) have been moved to utils.js.
  */
 
 // Global variable to store the current LLMCore session ID for the web client
@@ -33,20 +35,8 @@ let currentLlmSettings = {
 // Global state for Prompt Template Values (mirrors Flask session, updated via API)
 let currentPromptTemplateValues = {}; // Object: { "key1": "value1", "key2": "value2" }
 
-/**
- * Escapes HTML special characters in a string.
- * @param {string} unsafe - The string to escape.
- * @returns {string} The escaped string.
- */
-function escapeHtml(unsafe) {
-  if (unsafe === null || typeof unsafe === "undefined") return "";
-  return String(unsafe)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
+// escapeHtml and showToast functions are now in utils.js and should be globally available
+// if utils.js is loaded before this script.
 
 /**
  * Fetches initial status from the backend and updates the UI and global state.
@@ -888,82 +878,6 @@ function fetchAndDisplayPromptTemplateValues() {
       },
     });
   }
-}
-
-/**
- * Displays a Bootstrap toast notification.
- * @param {string} title - The title of the toast.
- * @param {string} message - The message body of the toast.
- * @param {string} type - Type of toast ('success', 'warning', 'danger', 'info').
- * @param {boolean} needsConfirmation - If true, adds Yes/No buttons.
- * @param {function} callback - Callback function for confirmation (receives true for Yes, false for No/Dismiss).
- */
-function showToast(
-  title,
-  message,
-  type = "info",
-  needsConfirmation = false,
-  callback = null,
-) {
-  const toastId = `toast-${Date.now()}`;
-  let buttonsHtml = "";
-  if (needsConfirmation) {
-    buttonsHtml = `
-            <div class="mt-2 pt-2 border-top">
-                <button type="button" class="btn btn-primary btn-sm btn-yes">Yes</button>
-                <button type="button" class="btn btn-secondary btn-sm btn-no" data-bs-dismiss="toast">No</button>
-            </div>
-        `;
-  }
-
-  const toastHtml = `
-        <div id="${toastId}" class="toast align-items-center text-white bg-${type} border-0" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="${!needsConfirmation}" data-bs-delay="${needsConfirmation ? "15000" : "5000"}">
-            <div class="d-flex">
-                <div class="toast-body">
-                    <strong>${escapeHtml(title)}</strong><br>
-                    ${escapeHtml(message)}
-                    ${buttonsHtml}
-                </div>
-                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
-            </div>
-        </div>
-    `;
-  $("#toast-container").append(toastHtml);
-  const toastElement = new bootstrap.Toast(document.getElementById(toastId));
-  toastElement.show();
-
-  const toastDomElement = document.getElementById(toastId);
-  let confirmationHandled = false; // Flag to ensure callback is only called once
-
-  if (needsConfirmation && callback) {
-    $(toastDomElement)
-      .find(".btn-yes")
-      .on("click", function () {
-        if (!confirmationHandled) {
-          confirmationHandled = true;
-          callback(true);
-          toastElement.hide();
-        }
-      });
-    $(toastDomElement)
-      .find(".btn-no")
-      .on("click", function () {
-        if (!confirmationHandled) {
-          confirmationHandled = true;
-          callback(false);
-          // Toast will hide due to data-bs-dismiss
-        }
-      });
-  }
-
-  toastDomElement.addEventListener("hidden.bs.toast", function () {
-    if (needsConfirmation && callback && !confirmationHandled) {
-      // If toast was dismissed by other means (e.g., close button) and confirmation was expected
-      // Treat as 'No' or 'Cancel'
-      callback(false);
-    }
-    this.remove();
-  });
 }
 
 /**
