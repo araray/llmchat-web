@@ -3,10 +3,8 @@
 /**
  * @file custom.js
  * @description Custom JavaScript and jQuery for the llmchat-web interface.
- * This file handles client-side logic, DOM manipulation, event handling,
- * AJAX calls to the Flask backend, session management,
- * data ingestion, and basic command tab interaction.
- * It also initializes other UI modules.
+ * This file handles client-side logic for session management (not API calls),
+ * and basic command tab interaction. It also initializes all other UI modules.
  *
  * Utility functions (escapeHtml, showToast) are in utils.js.
  * Session API call functions (apiFetchSessions, etc.) are in session_api.js.
@@ -15,6 +13,7 @@
  * LLM Settings UI logic is in llm_settings_ui.js.
  * Context Manager UI logic is in context_manager_ui.js.
  * Prompt Template Values UI logic is in prompt_template_ui.js.
+ * Ingestion UI logic is in ingestion_ui.js.
  */
 
 // Global variable to store the current LLMCore session ID for the web client
@@ -108,13 +107,11 @@ function fetchAndUpdateInitialStatus() {
         fetchAndPopulateRagCollections();
 
       currentPromptTemplateValues = status.prompt_template_values || {};
-      // renderPromptTemplateValuesTable is now in prompt_template_ui.js,
-      // it will be called by fetchAndDisplayPromptTemplateValues from that module.
       if (typeof fetchAndDisplayPromptTemplateValues === "function")
         fetchAndDisplayPromptTemplateValues();
 
       updateContextUsageDisplay(null);
-      fetchAndDisplaySessions();
+      fetchAndDisplaySessions(); // This function remains in custom.js
 
       if (currentLlmSessionId) {
         if (
@@ -165,7 +162,7 @@ function fetchAndUpdateInitialStatus() {
  */
 function fetchAndDisplaySessions() {
   console.log("Fetching sessions via apiFetchSessions...");
-  apiFetchSessions()
+  apiFetchSessions() // From session_api.js
     .done(function (sessions) {
       const $sessionList = $("#session-list").empty();
       if (sessions && sessions.length > 0) {
@@ -243,209 +240,6 @@ function updateContextUsageDisplay(contextUsage) {
   }
 }
 
-/**
- * Handles the submission of ingestion forms.
- * Uses fetch for SSE to stream progress.
- * @param {string} ingestType - The type of ingestion ('file', 'dir_zip', 'git').
- * @param {FormData} formData - The form data to submit.
- */
-async function handleIngestionFormSubmit(ingestType, formData) {
-  const $resultMsg = $("#ingestion-result-message");
-  const $progressBar = $("#ingestion-progress-bar");
-  const $progressContainer = $("#ingestion-progress-container");
-
-  $resultMsg
-    .removeClass("text-success text-danger")
-    .addClass("text-muted")
-    .text("Processing ingestion request...");
-  $progressContainer.show();
-  $progressBar
-    .css("width", "0%")
-    .removeClass("bg-success bg-danger")
-    .attr("aria-valuenow", 0)
-    .text("Starting...");
-
-  try {
-    const response = await fetch("/api/ingest", {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!response.ok) {
-      let errorText = `Server error: ${response.status} ${response.statusText}`;
-      try {
-        const errorData = await response.json();
-        errorText = errorData.error || errorText;
-      } catch (e) {
-        /* Ignore */
-      }
-      throw new Error(errorText);
-    }
-
-    if (!response.body) {
-      throw new Error("Response body is null, cannot read stream.");
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let filesProcessedInStream = 0;
-    let totalFilesFromEvent = 0;
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) {
-        console.log("Ingestion stream finished by server.");
-        if (
-          $progressBar.text() !== "Complete!" &&
-          $progressBar.text() !== "Failed!" &&
-          $progressBar.text() !== "Completed with Errors!"
-        ) {
-          $progressBar
-            .css("width", "100%")
-            .addClass("bg-warning")
-            .text("Stream ended, awaiting summary...");
-        }
-        break;
-      }
-      buffer += decoder.decode(value, { stream: true });
-
-      let eolIndex;
-      while ((eolIndex = buffer.indexOf("\n\n")) >= 0) {
-        const line = buffer.substring(0, eolIndex).trim();
-        buffer = buffer.substring(eolIndex + 2);
-
-        if (line.startsWith("data: ")) {
-          try {
-            const eventData = JSON.parse(line.substring(6));
-            console.log("SSE Event:", eventData);
-
-            if (eventData.type === "file_start") {
-              totalFilesFromEvent =
-                eventData.total_files || totalFilesFromEvent;
-              $resultMsg.html(
-                `Processing file <strong>${escapeHtml(eventData.filename)}</strong> (${eventData.file_index + 1} of ${totalFilesFromEvent})...`,
-              );
-              $progressBar.text(
-                `File ${eventData.file_index + 1}/${totalFilesFromEvent}`,
-              );
-            } else if (eventData.type === "file_end") {
-              filesProcessedInStream++;
-              const progressPercent =
-                totalFilesFromEvent > 0
-                  ? (filesProcessedInStream / totalFilesFromEvent) * 100
-                  : 50;
-              $progressBar
-                .css("width", `${progressPercent}%`)
-                .attr("aria-valuenow", progressPercent);
-              if (eventData.status === "success") {
-                $resultMsg.append(
-                  `<br><small class="text-success">- File <strong>${escapeHtml(eventData.filename)}</strong> processed successfully. Chunks added: ${eventData.chunks_added || 0}</small>`,
-                );
-              } else {
-                $resultMsg.append(
-                  `<br><small class="text-danger">- File <strong>${escapeHtml(eventData.filename)}</strong> failed: ${escapeHtml(eventData.error_message || "Unknown error")}</small>`,
-                );
-                $progressBar.addClass("bg-warning");
-              }
-            } else if (eventData.type === "ingestion_start") {
-              $resultMsg.html(
-                `Starting ingestion for <strong>${escapeHtml(eventData.ingest_type)}</strong> into collection <strong>${escapeHtml(eventData.collection_name)}</strong>...`,
-              );
-              $progressBar
-                .css("width", `25%`)
-                .attr("aria-valuenow", 25)
-                .text("Processing...");
-            } else if (eventData.type === "ingestion_complete") {
-              const summary = eventData.summary;
-              $progressBar.css("width", "100%").attr("aria-valuenow", 100);
-              if (
-                summary.status === "success" ||
-                (summary.files_with_errors !== undefined &&
-                  summary.files_with_errors === 0)
-              ) {
-                $progressBar.addClass("bg-success").text("Complete!");
-                $resultMsg
-                  .removeClass("text-muted text-danger")
-                  .addClass("text-success")
-                  .html(`<strong>Success!</strong> ${escapeHtml(summary.message) || "Ingestion completed."}<br>
-                                             Total Files Submitted: ${summary.total_files_submitted || "N/A"}<br>
-                                             Files Processed Successfully: ${summary.files_processed_successfully || "N/A"}<br>
-                                             Files With Errors: ${summary.files_with_errors || 0}<br>
-                                             Total Chunks Added: ${summary.total_chunks_added_to_db || 0}<br>
-                                             Target Collection: ${escapeHtml(summary.collection_name)}`);
-              } else {
-                $progressBar
-                  .addClass("bg-danger")
-                  .text("Completed with Errors!");
-                let errorDetailsHtml = "";
-                if (
-                  summary.error_messages &&
-                  summary.error_messages.length > 0
-                ) {
-                  errorDetailsHtml = "<br>Details:<ul>";
-                  summary.error_messages.forEach((err) => {
-                    errorDetailsHtml += `<li><small>${escapeHtml(err)}</small></li>`;
-                  });
-                  errorDetailsHtml += "</ul>";
-                }
-                $resultMsg
-                  .removeClass("text-muted text-success")
-                  .addClass("text-danger")
-                  .html(`<strong>Ingestion Completed with Errors!</strong> ${escapeHtml(summary.message) || ""}<br>
-                                             Total Files Submitted: ${summary.total_files_submitted || "N/A"}<br>
-                                             Files With Errors: ${summary.files_with_errors || "N/A"}<br>
-                                             Total Chunks Added: ${summary.total_chunks_added_to_db || 0}
-                                             ${errorDetailsHtml}`);
-              }
-              if (typeof fetchAndPopulateRagCollections === "function")
-                fetchAndPopulateRagCollections();
-              setTimeout(() => $progressContainer.fadeOut(), 3000);
-            } else if (eventData.type === "error") {
-              throw new Error(eventData.error);
-            } else if (eventData.type === "end") {
-              console.log(
-                "SSE stream 'end' event received from server for ingestion.",
-              );
-              if (
-                $progressBar.text() !== "Complete!" &&
-                $progressBar.text() !== "Completed with Errors!" &&
-                $progressBar.text() !== "Failed!"
-              ) {
-                $progressBar
-                  .css("width", "100%")
-                  .addClass("bg-warning")
-                  .text("Finished.");
-                $resultMsg.append(
-                  "<br><small>Ingestion process ended.</small>",
-                );
-                setTimeout(() => $progressContainer.fadeOut(), 3000);
-              }
-            }
-          } catch (e) {
-            console.warn(
-              "Error parsing SSE event data for ingestion:",
-              e,
-              "Line:",
-              line,
-            );
-          }
-        }
-      }
-    }
-  } catch (error) {
-    console.error(`Ingestion error (Type: ${ingestType}):`, error);
-    $progressBar.css("width", "100%").addClass("bg-danger").text("Failed!");
-    $resultMsg
-      .removeClass("text-muted text-success")
-      .addClass("text-danger")
-      .html(
-        `<strong>Error!</strong> Failed to ingest data: ${escapeHtml(error.message)}`,
-      );
-    setTimeout(() => $progressContainer.fadeOut(), 3000);
-  }
-}
-
 $(document).ready(function () {
   console.log("LLMChat Web: custom.js loaded and DOM ready.");
 
@@ -456,7 +250,9 @@ $(document).ready(function () {
   }
 
   // Initialize all UI modules
-  fetchAndUpdateInitialStatus();
+  fetchAndUpdateInitialStatus(); // Fetches initial state and calls specific UI updaters
+
+  // Call init functions from the new modules
   if (typeof initChatEventListeners === "function") initChatEventListeners();
   if (typeof initRagEventListeners === "function") initRagEventListeners();
   if (typeof initLlmSettingsEventListeners === "function")
@@ -465,11 +261,13 @@ $(document).ready(function () {
     initContextManagerEventListeners();
   if (typeof initPromptTemplateEventListeners === "function")
     initPromptTemplateEventListeners();
+  if (typeof initIngestionEventListeners === "function")
+    initIngestionEventListeners();
 
   // --- Session Management Event Handlers (using session_api.js) ---
   $("#btn-new-session").on("click", function () {
     console.log("New session button clicked.");
-    apiCreateNewSession()
+    apiCreateNewSession() // from session_api.js
       .done(function (newSessionResponse) {
         console.log("New session created:", newSessionResponse);
         currentLlmSessionId = newSessionResponse.id;
@@ -487,7 +285,9 @@ $(document).ready(function () {
           currentPromptTemplateValues =
             newSessionResponse.prompt_template_values;
 
-        fetchAndDisplaySessions();
+        fetchAndDisplaySessions(); // from custom.js (calls session_api.js)
+
+        // Call update/display functions from respective UI modules
         if (typeof updateRagControlsState === "function")
           updateRagControlsState();
         if (typeof fetchAndPopulateLlmProviders === "function")
@@ -495,23 +295,23 @@ $(document).ready(function () {
         if (typeof fetchAndDisplaySystemMessage === "function")
           fetchAndDisplaySystemMessage();
         if (typeof fetchAndDisplayPromptTemplateValues === "function")
-          fetchAndDisplayPromptTemplateValues(); // Call the new module's function
+          fetchAndDisplayPromptTemplateValues();
 
-        updateContextUsageDisplay(null);
+        updateContextUsageDisplay(null); // from custom.js
 
         stagedContextItems = [];
         if (typeof renderStagedContextItems === "function")
-          renderStagedContextItems();
+          renderStagedContextItems(); // from context_manager_ui.js
         if (
           $("#context-manager-tab-btn").hasClass("active") &&
           typeof fetchAndDisplayWorkspaceItems === "function"
         ) {
-          fetchAndDisplayWorkspaceItems();
+          fetchAndDisplayWorkspaceItems(); // from context_manager_ui.js
         }
       })
       .fail(function (jqXHR, textStatus, errorThrown) {
         console.error("Error creating new session:", textStatus, errorThrown);
-        showToast("Error", "Failed to create new session.", "danger");
+        showToast("Error", "Failed to create new session.", "danger"); // from utils.js
       });
   });
 
@@ -519,7 +319,7 @@ $(document).ready(function () {
     e.preventDefault();
     const sessionIdToLoad = $(this).data("session-id");
     console.log(`Loading session: ${sessionIdToLoad}`);
-    apiLoadSession(sessionIdToLoad)
+    apiLoadSession(sessionIdToLoad) // from session_api.js
       .done(function (response) {
         console.log("Session loaded response:", response);
         const loadedSessionData = response.session_data;
@@ -541,6 +341,7 @@ $(document).ready(function () {
         ) {
           loadedSessionData.messages.forEach((msg) => {
             if (typeof appendMessageToChat === "function") {
+              // from chat_ui.js
               appendMessageToChat(msg.content, msg.role, false, msg.id);
             }
           });
@@ -566,7 +367,7 @@ $(document).ready(function () {
             appliedSettings.prompt_template_values || {};
         }
 
-        fetchAndDisplaySessions();
+        fetchAndDisplaySessions(); // from custom.js
         $("#status-provider").text(currentLlmSettings.providerName || "N/A");
         $("#status-model").text(currentLlmSettings.modelName || "N/A");
 
@@ -584,9 +385,9 @@ $(document).ready(function () {
           fetchAndPopulateRagCollections();
         }
         if (typeof fetchAndDisplayPromptTemplateValues === "function")
-          fetchAndDisplayPromptTemplateValues(); // Call the new module's function
+          fetchAndDisplayPromptTemplateValues();
 
-        updateContextUsageDisplay(null);
+        updateContextUsageDisplay(null); // from custom.js
 
         stagedContextItems = [];
         if (typeof renderStagedContextItems === "function")
@@ -607,6 +408,7 @@ $(document).ready(function () {
   $("#btn-delete-session").on("click", function () {
     if (!currentLlmSessionId || $(this).prop("disabled")) return;
     showToast(
+      // from utils.js
       "Confirm",
       `Delete session ${currentLlmSessionId}? This cannot be undone.`,
       "warning",
@@ -614,7 +416,7 @@ $(document).ready(function () {
       function (confirmed) {
         if (confirmed) {
           console.log(`Deleting session: ${currentLlmSessionId}`);
-          apiDeleteSession(currentLlmSessionId)
+          apiDeleteSession(currentLlmSessionId) // from session_api.js
             .done(function (response) {
               console.log("Session delete response:", response);
               showToast(
@@ -628,8 +430,8 @@ $(document).ready(function () {
                 .append(
                   '<div class="message-bubble agent-message">Session deleted. Start or load a new one.</div>',
                 );
-              fetchAndDisplaySessions();
-              fetchAndUpdateInitialStatus();
+              fetchAndDisplaySessions(); // from custom.js
+              fetchAndUpdateInitialStatus(); // from custom.js
               stagedContextItems = [];
               if (typeof renderStagedContextItems === "function")
                 renderStagedContextItems();
@@ -653,95 +455,15 @@ $(document).ready(function () {
     );
   });
 
-  // --- Ingestion Event Handlers ---
-  $("#btn-ingest-data").on("click", function () {
-    var ingestionModal = new bootstrap.Modal(
-      document.getElementById("ingestionModal"),
-    );
-    $("#form-ingest-file")[0].reset();
-    $("#form-ingest-dir")[0].reset();
-    $("#form-ingest-git")[0].reset();
-    $("#ingestion-result-message")
-      .empty()
-      .addClass("text-muted")
-      .text("Ingestion progress will appear here...");
-    $("#ingestion-progress-bar").css("width", "0%").attr("aria-valuenow", 0);
-    $("#ingestion-progress-container").hide();
-    ingestionModal.show();
-  });
-
-  $("#form-ingest-file").on("submit", function (e) {
-    e.preventDefault();
-    const files = $("#ingest-file-input")[0].files;
-    const collectionName = $("#ingest-file-collection").val().trim();
-    if (!files.length || !collectionName) {
-      showToast(
-        "Error",
-        "Please select file(s) and specify a target collection name.",
-        "danger",
-      );
-      return;
-    }
-    const formData = new FormData();
-    formData.append("ingest_type", "file");
-    formData.append("collection_name", collectionName);
-    for (let i = 0; i < files.length; i++) {
-      formData.append("files[]", files[i]);
-    }
-    handleIngestionFormSubmit("file", formData);
-  });
-
-  $("#form-ingest-dir").on("submit", function (e) {
-    e.preventDefault();
-    const zipFile = $("#ingest-dir-zip-input")[0].files[0];
-    const collectionName = $("#ingest-dir-collection").val().trim();
-    const repoName = $("#ingest-dir-repo-name").val().trim() || null;
-    if (!zipFile || !collectionName) {
-      showToast(
-        "Error",
-        "Please select a ZIP file and specify a target collection name.",
-        "danger",
-      );
-      return;
-    }
-    const formData = new FormData();
-    formData.append("ingest_type", "dir_zip");
-    formData.append("collection_name", collectionName);
-    formData.append("zip_file", zipFile);
-    if (repoName) formData.append("repo_name", repoName);
-    handleIngestionFormSubmit("dir_zip", formData);
-  });
-
-  $("#form-ingest-git").on("submit", function (e) {
-    e.preventDefault();
-    const gitUrl = $("#ingest-git-url").val().trim();
-    const collectionName = $("#ingest-git-collection").val().trim();
-    const repoName = $("#ingest-git-repo-name").val().trim();
-    const gitRef = $("#ingest-git-ref").val().trim() || null;
-    if (!gitUrl || !collectionName || !repoName) {
-      showToast(
-        "Error",
-        "Please provide Git URL, Target Collection, and Repository Identifier.",
-        "danger",
-      );
-      return;
-    }
-    const formData = new FormData();
-    formData.append("ingest_type", "git");
-    formData.append("git_url", gitUrl);
-    formData.append("collection_name", collectionName);
-    formData.append("repo_name", repoName);
-    if (gitRef) formData.append("git_ref", gitRef);
-    handleIngestionFormSubmit("git", formData);
-  });
-
   // --- Settings Tab Event Handler (for parts not covered by specific UI modules) ---
   $("#settings-tab-btn").on("shown.bs.tab", function () {
     console.log(
       "Settings tab shown by custom.js. Specific UI modules handle their own updates.",
     );
-    // Note: fetchAndPopulateLlmProviders, fetchAndDisplaySystemMessage are called by initLlmSettingsEventListeners
-    // fetchAndDisplayPromptTemplateValues is called by initPromptTemplateEventListeners
+    // Note: LLM settings, RAG settings, and Prompt Template Values UI updates are
+    // now primarily handled within their respective init...EventListeners functions
+    // when the tab is shown, or when their specific controls are interacted with.
+    // fetchAndDisplayPromptTemplateValues() is called by initPromptTemplateEventListeners if settings tab is shown.
   });
 
   // --- Chat Input Token Estimator ---
@@ -800,5 +522,7 @@ $(document).ready(function () {
     }
   });
 
-  console.log("LLMChat Web REPL UI initialized (client-side).");
+  console.log(
+    "LLMChat Web REPL UI initialized (client-side). All modules should be initialized.",
+  );
 });
