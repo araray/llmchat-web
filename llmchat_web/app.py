@@ -65,7 +65,7 @@ try:
     APP_VERSION = version("llmchat-web")
 except PackageNotFoundError:
     # Fallback version if llmchat-web is not installed (e.g., running source directly)
-    APP_VERSION = "0.2.9-dev" # Ensure this matches the intended version in pyproject.toml
+    APP_VERSION = "0.3.8-dev" # Ensure this matches the intended version in pyproject.toml
     logging.getLogger("llmchat_web_startup").info(
         f"llmchat-web package not found (or not installed), using fallback version: {APP_VERSION}. "
         "This is normal if running directly from source without installation."
