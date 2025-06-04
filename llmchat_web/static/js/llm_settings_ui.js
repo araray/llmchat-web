@@ -15,7 +15,7 @@
 function fetchAndPopulateLlmProviders() {
   console.log("LLM_UI: Fetching LLM providers...");
   $.ajax({
-    url: "/api/llm/providers",
+    url: "/api/settings/llm/providers", // CORRECTED PATH
     type: "GET",
     dataType: "json",
     success: function (providers) {
@@ -45,9 +45,19 @@ function fetchAndPopulateLlmProviders() {
           // currentLlmSettings from custom.js
           $select.val(currentLlmSettings.providerName);
           fetchAndPopulateLlmModels(currentLlmSettings.providerName); // Trigger model population
+        } else {
+          // If no provider is pre-selected, ensure model dropdown is in a sensible default state
+          $("#llm-model-select")
+            .empty()
+            .append('<option selected value="">Select provider first</option>')
+            .prop("disabled", true);
         }
       } else {
         $select.append('<option value="" disabled>No providers found</option>');
+        $("#llm-model-select")
+          .empty()
+          .append('<option selected value="">No providers available</option>')
+          .prop("disabled", true);
       }
       $select.prop("disabled", false);
     },
@@ -56,6 +66,7 @@ function fetchAndPopulateLlmProviders() {
         "LLM_UI: Error fetching LLM providers:",
         textStatus,
         errorThrown,
+        jqXHR.responseText,
       );
       $("#llm-provider-select")
         .empty()
@@ -64,6 +75,12 @@ function fetchAndPopulateLlmProviders() {
         .empty()
         .append('<option value="">Select provider first</option>')
         .prop("disabled", true);
+      // Display error to user if appropriate
+      showToast(
+        "Error",
+        "Could not load LLM providers. Check server logs.",
+        "danger",
+      );
     },
   });
 }
@@ -90,7 +107,7 @@ function fetchAndPopulateLlmModels(providerName) {
   }
 
   $.ajax({
-    url: `/api/llm/providers/${providerName}/models`,
+    url: `/api/settings/llm/providers/${providerName}/models`, // CORRECTED PATH
     type: "GET",
     dataType: "json",
     success: function (models) {
@@ -127,11 +144,17 @@ function fetchAndPopulateLlmModels(providerName) {
         `LLM_UI: Error fetching models for ${providerName}:`,
         textStatus,
         errorThrown,
+        jqXHR.responseText,
       );
       $modelSelect
         .empty()
         .append('<option value="" disabled>Error loading models</option>')
         .prop("disabled", false); // Enable even on error to allow manual input if desired
+      showToast(
+        "Error",
+        `Could not load models for ${providerName}. Check server logs.`,
+        "danger",
+      );
     },
   });
 }
@@ -154,7 +177,7 @@ function applyLlmSettings() {
   );
 
   $.ajax({
-    url: "/api/settings/llm/update",
+    url: "/api/settings/llm/update", // This path was already correct
     type: "POST",
     contentType: "application/json",
     data: JSON.stringify({
@@ -185,6 +208,7 @@ function applyLlmSettings() {
         "LLM_UI: Error updating LLM settings on backend:",
         textStatus,
         errorThrown,
+        jqXHR.responseText,
       );
       showToast("Error", "Failed to apply LLM settings.", "danger"); // showToast from utils.js
     },
@@ -198,6 +222,7 @@ function applyLlmSettings() {
 function fetchAndDisplaySystemMessage() {
   console.log("LLM_UI: Fetching current system message...");
   // Use the globally synced currentLlmSettings.systemMessage from custom.js
+  // This is typically populated by fetchAndUpdateInitialStatus
   if (
     currentLlmSettings.systemMessage !== null &&
     currentLlmSettings.systemMessage !== undefined
@@ -205,8 +230,12 @@ function fetchAndDisplaySystemMessage() {
     $("#system-message-input").val(currentLlmSettings.systemMessage);
   } else {
     // Fallback AJAX call if global state is not set (should ideally be set by fetchAndUpdateInitialStatus)
+    // This indicates an issue if fetchAndUpdateInitialStatus didn't populate it.
+    console.warn(
+      "LLM_UI: currentLlmSettings.systemMessage is not set, attempting fallback fetch. This might indicate an earlier init problem.",
+    );
     $.ajax({
-      url: "/api/settings/system_message",
+      url: "/api/settings/system_message", // This path was already correct
       type: "GET",
       dataType: "json",
       success: function (response) {
@@ -221,6 +250,7 @@ function fetchAndDisplaySystemMessage() {
           "LLM_UI: Error fetching system message (fallback):",
           textStatus,
           errorThrown,
+          jqXHR.responseText,
         );
       },
     });
@@ -237,7 +267,7 @@ function applySystemMessage() {
   console.log("LLM_UI: Applying system message:", systemMessage);
 
   $.ajax({
-    url: "/api/settings/system_message/update",
+    url: "/api/settings/system_message/update", // This path was already correct
     type: "POST",
     contentType: "application/json",
     data: JSON.stringify({ system_message: systemMessage }),
@@ -254,6 +284,7 @@ function applySystemMessage() {
         "LLM_UI: Error updating system message:",
         textStatus,
         errorThrown,
+        jqXHR.responseText,
       );
       showToast("Error", "Failed to apply system message.", "danger"); // showToast from utils.js
     },
@@ -288,16 +319,14 @@ function initLlmSettingsEventListeners() {
   });
 
   // When settings tab is shown, ensure LLM settings UI is up-to-date
-  // Note: The prompt template values part of this handler remains in custom.js
-  // or will be moved to its own module.
   $("#settings-tab-btn").on("shown.bs.tab", function () {
     console.log(
       "LLM_UI: Settings tab shown, initializing LLM provider/model and system message.",
     );
-    fetchAndPopulateLlmProviders(); // This will also populate models if a provider is set
+    // These functions are now more robust due to corrected API paths
+    fetchAndPopulateLlmProviders();
     fetchAndDisplaySystemMessage();
-    // The call to fetchAndDisplayPromptTemplateValues() remains in custom.js's $(document).ready()
-    // or will be part of a separate prompt_template_ui.js initialization.
+    // The call to fetchAndDisplayPromptTemplateValues() is handled by prompt_template_ui.js
   });
   console.log("LLM Settings UI event listeners initialized.");
 }
