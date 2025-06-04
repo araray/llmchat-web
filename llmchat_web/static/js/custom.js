@@ -5,7 +5,8 @@
  * @description Custom JavaScript and jQuery for the llmchat-web interface.
  * This file handles client-side logic, DOM manipulation, event handling,
  * AJAX calls to the Flask backend, session management,
- * data ingestion, prompt template values, and basic command tab interaction.
+ * data ingestion, and basic command tab interaction.
+ * It also initializes other UI modules.
  *
  * Utility functions (escapeHtml, showToast) are in utils.js.
  * Session API call functions (apiFetchSessions, etc.) are in session_api.js.
@@ -13,13 +14,14 @@
  * RAG UI logic is in rag_ui.js.
  * LLM Settings UI logic is in llm_settings_ui.js.
  * Context Manager UI logic is in context_manager_ui.js.
+ * Prompt Template Values UI logic is in prompt_template_ui.js.
  */
 
 // Global variable to store the current LLMCore session ID for the web client
 let currentLlmSessionId = null;
 // Global array to store items staged for active context.
 // This is accessed and modified by context_manager_ui.js and chat_ui.js.
-let stagedContextItems = []; // Each item: {spec_item_id: 'actx_XYZ', type: 'text_content'|'file_content'|'workspace_item'|'message_history', id_ref?: 'actual_ws_or_msg_id', content?: 'text content', path?: 'file_path', no_truncate?: boolean }
+let stagedContextItems = [];
 
 // Global state for RAG settings (mirrors Flask session, updated via API)
 // This object is accessed and potentially modified by rag_ui.js
@@ -27,7 +29,7 @@ let currentRagSettings = {
   enabled: false,
   collectionName: null,
   kValue: 3,
-  filter: null, // Expects a dictionary or null
+  filter: null,
 };
 
 // Global state for LLM settings (mirrors Flask session, updated via API)
@@ -39,7 +41,8 @@ let currentLlmSettings = {
 };
 
 // Global state for Prompt Template Values (mirrors Flask session, updated via API)
-let currentPromptTemplateValues = {}; // Object: { "key1": "value1", "key2": "value2" }
+// This object is accessed and potentially modified by prompt_template_ui.js
+let currentPromptTemplateValues = {};
 
 // All major UI component functions and their event listeners are now in separate files.
 // This file primarily initializes them and handles any remaining global setup or minor UI interactions.
@@ -91,21 +94,24 @@ function fetchAndUpdateInitialStatus() {
       $("#status-provider").text(currentLlmSettings.providerName || "N/A");
       $("#status-model").text(currentLlmSettings.modelName || "N/A");
       if (typeof fetchAndPopulateLlmProviders === "function")
-        fetchAndPopulateLlmProviders(); // from llm_settings_ui.js
+        fetchAndPopulateLlmProviders();
       if (typeof fetchAndDisplaySystemMessage === "function")
-        fetchAndDisplaySystemMessage(); // from llm_settings_ui.js
+        fetchAndDisplaySystemMessage();
 
       currentRagSettings.enabled = status.rag_enabled || false;
       currentRagSettings.collectionName = status.rag_collection_name;
       currentRagSettings.kValue = status.rag_k_value || 3;
       currentRagSettings.filter = status.rag_filter || null;
       if (typeof updateRagControlsState === "function")
-        updateRagControlsState(); // from rag_ui.js
+        updateRagControlsState();
       if (typeof fetchAndPopulateRagCollections === "function")
-        fetchAndPopulateRagCollections(); // from rag_ui.js
+        fetchAndPopulateRagCollections();
 
       currentPromptTemplateValues = status.prompt_template_values || {};
-      renderPromptTemplateValuesTable(); // This function remains here for now
+      // renderPromptTemplateValuesTable is now in prompt_template_ui.js,
+      // it will be called by fetchAndDisplayPromptTemplateValues from that module.
+      if (typeof fetchAndDisplayPromptTemplateValues === "function")
+        fetchAndDisplayPromptTemplateValues();
 
       updateContextUsageDisplay(null);
       fetchAndDisplaySessions();
@@ -115,10 +121,10 @@ function fetchAndUpdateInitialStatus() {
           $("#context-manager-tab-btn").hasClass("active") &&
           typeof fetchAndDisplayWorkspaceItems === "function"
         ) {
-          fetchAndDisplayWorkspaceItems(); // from context_manager_ui.js
+          fetchAndDisplayWorkspaceItems();
         }
         if (typeof renderStagedContextItems === "function")
-          renderStagedContextItems(); // from context_manager_ui.js
+          renderStagedContextItems();
       } else {
         $("#workspace-items-list").html(
           '<p class="text-muted p-2">No active session. Create or load one.</p>',
@@ -159,7 +165,7 @@ function fetchAndUpdateInitialStatus() {
  */
 function fetchAndDisplaySessions() {
   console.log("Fetching sessions via apiFetchSessions...");
-  apiFetchSessions() // From session_api.js
+  apiFetchSessions()
     .done(function (sessions) {
       const $sessionList = $("#session-list").empty();
       if (sessions && sessions.length > 0) {
@@ -234,76 +240,6 @@ function updateContextUsageDisplay(contextUsage) {
       .text("N/A")
       .removeClass("bg-success bg-warning bg-danger")
       .addClass("bg-info");
-  }
-}
-
-/**
- * Renders the prompt template values in the settings table.
- */
-function renderPromptTemplateValuesTable() {
-  const $tbody = $("#prompt-values-tbody");
-  $tbody.empty(); // Clear existing rows
-
-  if (Object.keys(currentPromptTemplateValues).length === 0) {
-    $tbody.append(
-      '<tr><td colspan="3" class="text-center text-muted">No prompt values set.</td></tr>',
-    );
-    return;
-  }
-
-  for (const key in currentPromptTemplateValues) {
-    if (currentPromptTemplateValues.hasOwnProperty(key)) {
-      const value = currentPromptTemplateValues[key];
-      const $row = $("<tr>").append(
-        $("<td>").text(key),
-        $("<td>").text(value),
-        $("<td>").append(
-          $(
-            '<button class="btn btn-danger btn-sm btn-delete-prompt-value" title="Delete Value"><i class="fas fa-trash-alt fa-xs"></i></button>',
-          ).attr("data-key", key),
-        ),
-      );
-      $tbody.append($row);
-    }
-  }
-}
-
-/**
- * Fetches current prompt template values from the backend and updates the UI.
- */
-function fetchAndDisplayPromptTemplateValues() {
-  console.log("Fetching prompt template values...");
-  if (
-    currentPromptTemplateValues &&
-    typeof currentPromptTemplateValues === "object" &&
-    Object.keys(currentPromptTemplateValues).length > 0
-  ) {
-    renderPromptTemplateValuesTable();
-  } else {
-    $.ajax({
-      url: "/api/settings/prompt_template_values",
-      type: "GET",
-      dataType: "json",
-      success: function (response) {
-        console.log("Prompt template values received (fallback):", response);
-        if (response && typeof response.prompt_template_values === "object") {
-          currentPromptTemplateValues = response.prompt_template_values;
-        } else {
-          currentPromptTemplateValues = {};
-        }
-        renderPromptTemplateValuesTable();
-      },
-      error: function (jqXHR, textStatus, errorThrown) {
-        console.error(
-          "Error fetching prompt template values (fallback):",
-          textStatus,
-          errorThrown,
-        );
-        currentPromptTemplateValues = {};
-        renderPromptTemplateValuesTable();
-        showToast("Error", "Failed to load prompt template values.", "danger");
-      },
-    });
   }
 }
 
@@ -463,7 +399,7 @@ async function handleIngestionFormSubmit(ingestType, formData) {
                                              ${errorDetailsHtml}`);
               }
               if (typeof fetchAndPopulateRagCollections === "function")
-                fetchAndPopulateRagCollections(); // from rag_ui.js
+                fetchAndPopulateRagCollections();
               setTimeout(() => $progressContainer.fadeOut(), 3000);
             } else if (eventData.type === "error") {
               throw new Error(eventData.error);
@@ -519,6 +455,7 @@ $(document).ready(function () {
     );
   }
 
+  // Initialize all UI modules
   fetchAndUpdateInitialStatus();
   if (typeof initChatEventListeners === "function") initChatEventListeners();
   if (typeof initRagEventListeners === "function") initRagEventListeners();
@@ -526,6 +463,8 @@ $(document).ready(function () {
     initLlmSettingsEventListeners();
   if (typeof initContextManagerEventListeners === "function")
     initContextManagerEventListeners();
+  if (typeof initPromptTemplateEventListeners === "function")
+    initPromptTemplateEventListeners();
 
   // --- Session Management Event Handlers (using session_api.js) ---
   $("#btn-new-session").on("click", function () {
@@ -555,10 +494,12 @@ $(document).ready(function () {
           fetchAndPopulateLlmProviders();
         if (typeof fetchAndDisplaySystemMessage === "function")
           fetchAndDisplaySystemMessage();
-        renderPromptTemplateValuesTable();
+        if (typeof fetchAndDisplayPromptTemplateValues === "function")
+          fetchAndDisplayPromptTemplateValues(); // Call the new module's function
+
         updateContextUsageDisplay(null);
 
-        stagedContextItems = []; // Reset global
+        stagedContextItems = [];
         if (typeof renderStagedContextItems === "function")
           renderStagedContextItems();
         if (
@@ -642,11 +583,12 @@ $(document).ready(function () {
         ) {
           fetchAndPopulateRagCollections();
         }
+        if (typeof fetchAndDisplayPromptTemplateValues === "function")
+          fetchAndDisplayPromptTemplateValues(); // Call the new module's function
 
-        renderPromptTemplateValuesTable();
         updateContextUsageDisplay(null);
 
-        stagedContextItems = []; // Reset global
+        stagedContextItems = [];
         if (typeof renderStagedContextItems === "function")
           renderStagedContextItems();
         if (
@@ -688,7 +630,7 @@ $(document).ready(function () {
                 );
               fetchAndDisplaySessions();
               fetchAndUpdateInitialStatus();
-              stagedContextItems = []; // Reset global
+              stagedContextItems = [];
               if (typeof renderStagedContextItems === "function")
                 renderStagedContextItems();
               if (
@@ -711,154 +653,95 @@ $(document).ready(function () {
     );
   });
 
-  // --- Settings Tab Event Handlers ---
-  // The LLM settings part of this is now handled by initLlmSettingsEventListeners in llm_settings_ui.js
-  // The RAG settings part is handled by initRagEventListeners in rag_ui.js
-  $("#settings-tab-btn").on("shown.bs.tab", function () {
-    console.log("Settings tab shown. Initializing Prompt Template Values.");
-    // LLM provider/model and system message are initialized by llm_settings_ui.js
-    // RAG controls are initialized by rag_ui.js
-    fetchAndDisplayPromptTemplateValues(); // This part remains for now
+  // --- Ingestion Event Handlers ---
+  $("#btn-ingest-data").on("click", function () {
+    var ingestionModal = new bootstrap.Modal(
+      document.getElementById("ingestionModal"),
+    );
+    $("#form-ingest-file")[0].reset();
+    $("#form-ingest-dir")[0].reset();
+    $("#form-ingest-git")[0].reset();
+    $("#ingestion-result-message")
+      .empty()
+      .addClass("text-muted")
+      .text("Ingestion progress will appear here...");
+    $("#ingestion-progress-bar").css("width", "0%").attr("aria-valuenow", 0);
+    $("#ingestion-progress-container").hide();
+    ingestionModal.show();
   });
 
-  // --- Prompt Template Values Event Handlers ---
-  $("#form-add-prompt-value").on("submit", function (e) {
+  $("#form-ingest-file").on("submit", function (e) {
     e.preventDefault();
-    const key = $("#new-prompt-key").val().trim();
-    const value = $("#new-prompt-value").val().trim();
-    if (!key || !value) {
+    const files = $("#ingest-file-input")[0].files;
+    const collectionName = $("#ingest-file-collection").val().trim();
+    if (!files.length || !collectionName) {
       showToast(
         "Error",
-        "Both key and value are required for prompt template values.",
+        "Please select file(s) and specify a target collection name.",
         "danger",
       );
       return;
     }
-    console.log(`Adding prompt template value: ${key} = ${value}`);
-    $.ajax({
-      url: "/api/settings/prompt_template_values/update",
-      type: "POST",
-      contentType: "application/json",
-      data: JSON.stringify({ key: key, value: value }),
-      dataType: "json",
-      success: function (response) {
-        if (response && response.prompt_template_values) {
-          currentPromptTemplateValues = response.prompt_template_values;
-          renderPromptTemplateValuesTable();
-          $("#form-add-prompt-value")[0].reset();
-          showToast(
-            "Success",
-            `Prompt value for '${escapeHtml(key)}' saved.`,
-            "success",
-          );
-        } else {
-          showToast(
-            "Error",
-            response.error || "Failed to save prompt value.",
-            "danger",
-          );
-        }
-      },
-      error: function (jqXHR) {
-        const errorMsg = jqXHR.responseJSON
-          ? jqXHR.responseJSON.error
-          : "Server error saving prompt value.";
-        showToast("Error", errorMsg, "danger");
-      },
-    });
+    const formData = new FormData();
+    formData.append("ingest_type", "file");
+    formData.append("collection_name", collectionName);
+    for (let i = 0; i < files.length; i++) {
+      formData.append("files[]", files[i]);
+    }
+    handleIngestionFormSubmit("file", formData);
   });
 
-  $("#prompt-values-tbody").on(
-    "click",
-    ".btn-delete-prompt-value",
-    function () {
-      const keyToDelete = $(this).data("key");
+  $("#form-ingest-dir").on("submit", function (e) {
+    e.preventDefault();
+    const zipFile = $("#ingest-dir-zip-input")[0].files[0];
+    const collectionName = $("#ingest-dir-collection").val().trim();
+    const repoName = $("#ingest-dir-repo-name").val().trim() || null;
+    if (!zipFile || !collectionName) {
       showToast(
-        "Confirm",
-        `Delete prompt value for key "${escapeHtml(keyToDelete)}"?`,
-        "warning",
-        true,
-        function (confirmed) {
-          if (confirmed) {
-            console.log(
-              `Deleting prompt template value for key: ${keyToDelete}`,
-            );
-            $.ajax({
-              url: "/api/settings/prompt_template_values/delete_key",
-              type: "POST",
-              contentType: "application/json",
-              data: JSON.stringify({ key: keyToDelete }),
-              dataType: "json",
-              success: function (response) {
-                if (response && response.prompt_template_values) {
-                  currentPromptTemplateValues = response.prompt_template_values;
-                  renderPromptTemplateValuesTable();
-                  showToast(
-                    "Success",
-                    `Prompt value for '${escapeHtml(keyToDelete)}' deleted.`,
-                    "success",
-                  );
-                } else {
-                  showToast(
-                    "Error",
-                    response.error || "Failed to delete prompt value.",
-                    "danger",
-                  );
-                }
-              },
-              error: function (jqXHR) {
-                const errorMsg = jqXHR.responseJSON
-                  ? jqXHR.responseJSON.error
-                  : "Server error deleting prompt value.";
-                showToast("Error", errorMsg, "danger");
-              },
-            });
-          }
-        },
+        "Error",
+        "Please select a ZIP file and specify a target collection name.",
+        "danger",
       );
-    },
-  );
+      return;
+    }
+    const formData = new FormData();
+    formData.append("ingest_type", "dir_zip");
+    formData.append("collection_name", collectionName);
+    formData.append("zip_file", zipFile);
+    if (repoName) formData.append("repo_name", repoName);
+    handleIngestionFormSubmit("dir_zip", formData);
+  });
 
-  $("#btn-clear-all-prompt-values").on("click", function () {
-    showToast(
-      "Confirm",
-      "Clear all prompt template values for this session?",
-      "warning",
-      true,
-      function (confirmed) {
-        if (confirmed) {
-          console.log("Clearing all prompt template values.");
-          $.ajax({
-            url: "/api/settings/prompt_template_values/clear_all",
-            type: "POST",
-            dataType: "json",
-            success: function (response) {
-              if (response && response.prompt_template_values !== undefined) {
-                currentPromptTemplateValues = response.prompt_template_values;
-                renderPromptTemplateValuesTable();
-                showToast(
-                  "Success",
-                  "All prompt template values cleared.",
-                  "success",
-                );
-              } else {
-                showToast(
-                  "Error",
-                  response.error || "Failed to clear prompt values.",
-                  "danger",
-                );
-              }
-            },
-            error: function (jqXHR) {
-              const errorMsg = jqXHR.responseJSON
-                ? jqXHR.responseJSON.error
-                : "Server error clearing prompt values.";
-              showToast("Error", errorMsg, "danger");
-            },
-          });
-        }
-      },
+  $("#form-ingest-git").on("submit", function (e) {
+    e.preventDefault();
+    const gitUrl = $("#ingest-git-url").val().trim();
+    const collectionName = $("#ingest-git-collection").val().trim();
+    const repoName = $("#ingest-git-repo-name").val().trim();
+    const gitRef = $("#ingest-git-ref").val().trim() || null;
+    if (!gitUrl || !collectionName || !repoName) {
+      showToast(
+        "Error",
+        "Please provide Git URL, Target Collection, and Repository Identifier.",
+        "danger",
+      );
+      return;
+    }
+    const formData = new FormData();
+    formData.append("ingest_type", "git");
+    formData.append("git_url", gitUrl);
+    formData.append("collection_name", collectionName);
+    formData.append("repo_name", repoName);
+    if (gitRef) formData.append("git_ref", gitRef);
+    handleIngestionFormSubmit("git", formData);
+  });
+
+  // --- Settings Tab Event Handler (for parts not covered by specific UI modules) ---
+  $("#settings-tab-btn").on("shown.bs.tab", function () {
+    console.log(
+      "Settings tab shown by custom.js. Specific UI modules handle their own updates.",
     );
+    // Note: fetchAndPopulateLlmProviders, fetchAndDisplaySystemMessage are called by initLlmSettingsEventListeners
+    // fetchAndDisplayPromptTemplateValues is called by initPromptTemplateEventListeners
   });
 
   // --- Chat Input Token Estimator ---
