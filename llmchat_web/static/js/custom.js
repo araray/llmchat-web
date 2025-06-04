@@ -7,7 +7,7 @@
  * AJAX calls to the Flask backend, SSE for streaming chat, session management,
  * per-message actions, workspace item management, active context specification,
  * RAG controls, data ingestion (now with SSE for files), LLM settings,
- * direct RAG search, and prompt template values.
+ * direct RAG search, prompt template values, and basic command tab interaction.
  */
 
 // Global variable to store the current LLMCore session ID for the web client
@@ -2437,18 +2437,48 @@ $(document).ready(function () {
   }
   updateChatInputTokenEstimate();
 
+  // Updated REPL Command Input Handler
   $("#repl-command-input").on("keypress", function (e) {
     if (e.key === "Enter") {
+      e.preventDefault(); // Prevent default form submission if it's in a form
       const commandText = $(this).val().trim();
       if (commandText) {
-        console.log("REPL command entered (UI):", commandText);
+        console.log("REPL command to send:", commandText);
         $("#repl-command-output").prepend(
           `<div class="text-info"><i class="fas fa-angle-right"></i> ${escapeHtml(commandText)}</div>`,
         );
-        $("#repl-command-output").prepend(
-          `<div class="text-warning">  <i class="fas fa-spinner fa-spin"></i> Processing REPL command (not yet implemented)...</div>`,
-        );
-        $(this).val("");
+        $(this).val(""); // Clear input
+
+        // Send command to backend
+        $.ajax({
+          url: "/api/command",
+          type: "POST",
+          contentType: "application/json",
+          data: JSON.stringify({ command: commandText }),
+          dataType: "json",
+          success: function (response) {
+            console.log("REPL command response:", response);
+            let outputHtml = `<div class="text-success">`;
+            if (response.output) {
+              outputHtml += `<i class="fas fa-check-circle"></i> ${escapeHtml(response.output)}`;
+            } else if (response.command_received) {
+              outputHtml += `<i class="fas fa-check-circle"></i> Command '${escapeHtml(response.command_received)}' acknowledged. Status: ${escapeHtml(response.status || "unknown")}`;
+            } else {
+              outputHtml += `<i class="fas fa-info-circle"></i> Empty response from server.`;
+            }
+            outputHtml += `</div>`;
+            $("#repl-command-output").prepend(outputHtml);
+          },
+          error: function (jqXHR, textStatus, errorThrown) {
+            console.error("REPL command error:", textStatus, errorThrown);
+            const errorMsg = jqXHR.responseJSON
+              ? jqXHR.responseJSON.error
+              : "Failed to send command.";
+            $("#repl-command-output").prepend(
+              `<div class="text-danger"><i class="fas fa-exclamation-triangle"></i> Error: ${escapeHtml(errorMsg)}</div>`,
+            );
+          },
+        });
       }
     }
   });
