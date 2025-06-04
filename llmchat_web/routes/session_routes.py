@@ -6,7 +6,7 @@ as well as operations on messages within sessions.
 """
 import logging
 import uuid # For generating new session IDs
-from typing import Any, Optional, Dict # Added Dict for type hinting
+from typing import Any, Optional, Dict
 
 from flask import jsonify, request
 from flask import session as flask_session
@@ -26,8 +26,8 @@ from ..app import (
 # Import specific LLMCore exceptions and models relevant to sessions
 from llmcore import (
     LLMCoreError, SessionNotFoundError,
-    ChatSession as LLMCoreChatSession, # May be used for type hinting or direct interaction
-    Role as LLMCoreRole # For checking message roles if needed, though not directly in these routes
+    ChatSession as LLMCoreChatSession,
+    Role as LLMCoreRole
 )
 
 # Configure a local logger for this specific routes module
@@ -42,20 +42,18 @@ if not logger.handlers and app_logger:
 
 # --- Session Management API Endpoints ---
 
-# Note: session_bp has url_prefix='/api/sessions'.
-# So, this route will be accessible at GET /api/sessions
-@session_bp.route("", methods=["GET"]) # Empty path for the blueprint's root
+@session_bp.route("", methods=["GET"])
 @async_to_sync_in_flask
 async def list_sessions_route() -> Any:
     """
     Lists all available LLMCore sessions.
-    Retrieves session metadata from LLMCore.
+    Retrieves session metadata (ID, name, updated_at, message_count) from LLMCore.
     """
     if not llmcore_instance:
         logger.error("Attempted to list sessions, but LLM service (llmcore_instance) is not available.")
         return jsonify({"error": "LLM service not available."}), 503
     try:
-        sessions = await llmcore_instance.list_sessions()
+        sessions = await llmcore_instance.list_sessions() # Returns List[Dict[str, Any]]
         logger.info(f"Successfully listed {len(sessions)} sessions.")
         return jsonify(sessions)
     except LLMCoreError as e:
@@ -71,42 +69,44 @@ async def list_sessions_route() -> Any:
 async def new_session_route() -> Any:
     """
     Initializes a new session context in the Flask web session.
-    It generates a new potential LLMCore session ID and resets relevant
-    Flask session variables (RAG settings, LLM provider/model, system message,
-    prompt template values) to their defaults based on LLMCore configuration.
-    An actual LLMCore session is typically created persistently on the first chat message.
+    Generates a new potential LLMCore session ID and resets relevant Flask session
+    variables (RAG settings, LLM provider/model, system message, prompt template values)
+    to their defaults, typically derived from LLMCore's application configuration.
+    An actual persistent LLMCore session is created on the first chat message.
     """
     if not llmcore_instance:
         logger.error("Attempted to create new session context, but LLM service is not available.")
         return jsonify({"error": "LLM service not available."}), 503
     try:
         new_llmcore_session_id = f"web_session_{uuid.uuid4().hex}"
-        set_current_web_session_id(new_llmcore_session_id) # Store in Flask session
+        set_current_web_session_id(new_llmcore_session_id)
 
-        # Reset Flask session variables to defaults from LLMCore config or sensible fallbacks
+        llmcore_cfg = llmcore_instance.config
+
+        # Reset Flask session variables to defaults
         flask_session['rag_enabled'] = False
-        flask_session['rag_collection_name'] = llmcore_instance.config.get("storage.vector.default_collection") if llmcore_instance.config else None
-        flask_session['rag_k_value'] = llmcore_instance.config.get("context_management.rag_retrieval_k", 3) if llmcore_instance.config else 3
+        flask_session['rag_collection_name'] = llmcore_cfg.get("storage.vector.default_collection") if llmcore_cfg else None
+        flask_session['rag_k_value'] = llmcore_cfg.get("context_management.rag_retrieval_k", 3) if llmcore_cfg else 3
         flask_session['rag_filter'] = None
-        flask_session['current_provider_name'] = llmcore_instance.config.get("llmcore.default_provider") if llmcore_instance.config else None
 
-        if flask_session.get('current_provider_name') and llmcore_instance.config:
-            flask_session['current_model_name'] = llmcore_instance.config.get(f"providers.{flask_session['current_provider_name']}.default_model")
+        default_provider = llmcore_cfg.get("llmcore.default_provider") if llmcore_cfg else None
+        flask_session['current_provider_name'] = default_provider
+        if default_provider and llmcore_cfg:
+            flask_session['current_model_name'] = llmcore_cfg.get(f"providers.{default_provider}.default_model")
         else:
             flask_session['current_model_name'] = None
 
         flask_session['system_message'] = "" # Default to empty
         flask_session['prompt_template_values'] = {} # Default to empty
 
-        flask_session.modified = True # Ensure session is saved
+        flask_session.modified = True
 
-        logger.info(f"New web session context initiated. Potential LLMCore ID: {new_llmcore_session_id}. Flask session RAG/LLM/Prompt settings reset to defaults.")
+        logger.info(f"New web session context initiated. Potential LLMCore ID: {new_llmcore_session_id}. Flask session settings reset to defaults.")
 
-        # Return the new session ID and the settings that were applied to the Flask session
         response_payload: Dict[str, Any] = {
-            "id": new_llmcore_session_id, # This is the ID for the *next* LLMCore session
-            "name": None, # LLMCore session name is not set until first interaction
-            "messages": [], # No messages in a new session context
+            "id": new_llmcore_session_id,
+            "name": None,
+            "messages": [],
             "rag_settings": {
                 "enabled": flask_session['rag_enabled'],
                 "collection_name": flask_session['rag_collection_name'],
@@ -120,8 +120,8 @@ async def new_session_route() -> Any:
             },
             "prompt_template_values": flask_session['prompt_template_values'],
         }
-        return jsonify(response_payload), 201 # 201 Created (for the new session context)
-    except LLMCoreError as e: # Catch broad LLMCore errors if config access fails
+        return jsonify(response_payload), 201
+    except LLMCoreError as e:
         logger.error(f"Error creating new session context: {e}", exc_info=True)
         return jsonify({"error": f"Failed to initialize new session context: {str(e)}"}), 500
     except Exception as e_unexp:
@@ -135,9 +135,8 @@ async def load_session_route(session_id_to_load: str) -> Any:
     """
     Loads an existing LLMCore session by its ID.
     Sets the loaded session as the current session in the Flask web session.
-    Retrieves the session's data (messages, metadata) from LLMCore and updates
-    the Flask session's RAG/LLM settings based on the loaded session's metadata,
-    falling back to defaults if metadata is missing.
+    Retrieves the session's data and updates Flask session settings based on
+    the loaded session's metadata, with fallbacks to application defaults.
     """
     if not llmcore_instance:
         logger.error(f"Attempted to load session {session_id_to_load}, but LLM service is not available.")
@@ -146,52 +145,65 @@ async def load_session_route(session_id_to_load: str) -> Any:
         logger.info(f"Attempting to load session: {session_id_to_load}")
         session_obj: Optional[LLMCoreChatSession] = await llmcore_instance.get_session(session_id_to_load)
 
-        # LLMCore's get_session might return a new, empty session if the ID doesn't exist
-        # or if it's configured to do so. We need to ensure it's an existing session.
-        # A more robust check: list sessions and see if this ID is present.
         all_sessions_meta = await llmcore_instance.list_sessions()
         if not any(s['id'] == session_id_to_load for s in all_sessions_meta):
              logger.warning(f"Session ID '{session_id_to_load}' not found in persistent storage during load attempt.")
              return jsonify({"error": "Session not found in persistent storage."}), 404
-        # If session_obj is None after the check above, it means get_session failed more critically.
-        if not session_obj: # Should ideally not happen if list_sessions found it and get_session is consistent
+        if not session_obj:
             logger.error(f"Session {session_id_to_load} was listed but get_session returned None. This indicates an inconsistency.")
             return jsonify({"error": "Session data could not be retrieved despite being listed."}), 500
 
+        set_current_web_session_id(session_obj.id)
 
-        set_current_web_session_id(session_obj.id) # session_obj.id will be session_id_to_load
-
-        # Update Flask session with settings from the loaded LLMCore session's metadata
+        # Update Flask session with settings from the loaded LLMCore session's metadata, with fallbacks
         session_metadata = session_obj.metadata or {}
+        llmcore_cfg = llmcore_instance.config # Cache for easier access
+
+        # Determine Provider Name
+        # Precedence: LLMCore Session Metadata -> LLMCore App Default Config -> None
+        provider_from_meta = session_metadata.get('current_provider_name')
+        if provider_from_meta:
+            flask_session['current_provider_name'] = provider_from_meta
+        elif llmcore_cfg:
+            flask_session['current_provider_name'] = llmcore_cfg.get("llmcore.default_provider")
+        else:
+            flask_session['current_provider_name'] = None
+
+        # Determine Model Name
+        # Precedence: LLMCore Session Metadata -> Provider's Default (based on determined provider) -> None
+        model_from_meta = session_metadata.get('current_model_name')
+        if model_from_meta:
+            flask_session['current_model_name'] = model_from_meta
+        else:
+            current_provider = flask_session.get('current_provider_name')
+            if current_provider and llmcore_cfg:
+                flask_session['current_model_name'] = llmcore_cfg.get(f"providers.{current_provider}.default_model")
+            else:
+                flask_session['current_model_name'] = None
+
+        # RAG settings
         flask_session['rag_enabled'] = session_metadata.get('rag_enabled', False)
         flask_session['rag_collection_name'] = session_metadata.get(
             'rag_collection_name',
-            llmcore_instance.config.get("storage.vector.default_collection") if llmcore_instance.config else None
+            llmcore_cfg.get("storage.vector.default_collection") if llmcore_cfg else None
         )
         flask_session['rag_k_value'] = session_metadata.get(
             'rag_k_value',
-            llmcore_instance.config.get("context_management.rag_retrieval_k", 3) if llmcore_instance.config else 3
+            llmcore_cfg.get("context_management.rag_retrieval_k", 3) if llmcore_cfg else 3
         )
         flask_session['rag_filter'] = session_metadata.get('rag_filter') # Expects dict or None
-        flask_session['current_provider_name'] = session_metadata.get(
-            'current_provider_name',
-            llmcore_instance.config.get("llmcore.default_provider") if llmcore_instance.config else None
-        )
-        flask_session['current_model_name'] = session_metadata.get('current_model_name') # Can be None
+
+        # System message and prompt template values
         flask_session['system_message'] = session_metadata.get('system_message', "")
         flask_session['prompt_template_values'] = session_metadata.get('prompt_template_values', {})
 
-        # If model became None after loading from metadata, try to set to provider's default
-        if flask_session.get('current_model_name') is None and flask_session.get('current_provider_name') and llmcore_instance.config:
-             flask_session['current_model_name'] = llmcore_instance.config.get(f"providers.{flask_session['current_provider_name']}.default_model")
+        flask_session.modified = True
 
-        flask_session.modified = True # Ensure session is saved
-
-        logger.info(f"Successfully loaded session {session_obj.id}. Flask session RAG/LLM/Prompt settings updated from its metadata or defaults.")
+        logger.info(f"Successfully loaded session {session_obj.id}. Flask session settings updated from its metadata or defaults.")
 
         response_payload: Dict[str, Any] = {
-            "session_data": session_obj.model_dump(mode="json"), # Full session data from LLMCore
-            "applied_settings": { # The settings now active in Flask session
+            "session_data": session_obj.model_dump(mode="json"),
+            "applied_settings": {
                 "rag_enabled": flask_session['rag_enabled'],
                 "rag_collection_name": flask_session['rag_collection_name'],
                 "rag_k_value": flask_session['rag_k_value'],
@@ -203,7 +215,7 @@ async def load_session_route(session_id_to_load: str) -> Any:
             }
         }
         return jsonify(response_payload)
-    except SessionNotFoundError: # Should be caught if get_session raises it for non-existent ID
+    except SessionNotFoundError:
         logger.warning(f"Session {session_id_to_load} not found by LLMCore during load.")
         return jsonify({"error": "Session not found."}), 404
     except LLMCoreError as e:
@@ -231,15 +243,14 @@ async def delete_session_route(session_id_to_delete: str) -> Any:
         if deleted:
             logger.info(f"Successfully deleted session {session_id_to_delete} from LLMCore.")
             if get_current_web_session_id() == session_id_to_delete:
-                set_current_web_session_id(None) # Clear from Flask session if it was current
+                set_current_web_session_id(None)
                 flask_session.modified = True
                 logger.info(f"Cleared deleted session {session_id_to_delete} from current Flask session ID.")
             return jsonify({"message": f"Session '{session_id_to_delete}' deleted successfully."})
         else:
-            # delete_session might return False if not found in persistent store and not in transient cache.
             logger.warning(f"Session {session_id_to_delete} not found by LLMCore for deletion, or already non-existent.")
-            return jsonify({"error": "Session not found or could not be deleted by LLMCore (it may have already been deleted or never existed persistently)."}), 404
-    except LLMCoreError as e: # Catch specific LLMCore errors during deletion
+            return jsonify({"error": "Session not found or could not be deleted by LLMCore."}), 404
+    except LLMCoreError as e:
         logger.error(f"Error deleting session {session_id_to_delete}: {e}", exc_info=True)
         return jsonify({"error": f"Failed to delete session: {str(e)}"}), 500
     except Exception as e_unexp:
@@ -258,7 +269,6 @@ async def delete_message_from_session_route(session_id: str, message_id: str) ->
         return jsonify({"error": "LLM service not available."}), 503
     try:
         logger.info(f"Attempting to delete message '{message_id}' from session '{session_id}'.")
-        # Assuming llmcore_instance.delete_message_from_session exists and returns boolean
         success = await llmcore_instance.delete_message_from_session(session_id, message_id)
         if success:
             logger.info(f"Successfully deleted message '{message_id}' from session '{session_id}'.")
@@ -269,7 +279,7 @@ async def delete_message_from_session_route(session_id: str, message_id: str) ->
     except SessionNotFoundError:
         logger.warning(f"Session '{session_id}' not found when trying to delete message '{message_id}'.")
         return jsonify({"error": f"Session '{session_id}' not found."}), 404
-    except LLMCoreError as e: # Catch other LLMCore specific errors
+    except LLMCoreError as e:
         logger.error(f"Error deleting message {message_id} from session {session_id}: {e}", exc_info=True)
         return jsonify({"error": f"Failed to delete message: {str(e)}"}), 500
     except Exception as e_unexp:
