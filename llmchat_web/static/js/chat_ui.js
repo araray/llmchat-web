@@ -2,7 +2,7 @@
 
 /**
  * @file chat_ui.js
- * @description Handles chat message UI, sending messages, SSE, and per-message actions.
+ * @description Handles chat message UI, sending messages, SSE, per-message actions, and raw output display.
  * Depends on utils.js for helper functions (escapeHtml, showToast) and
  * accesses global variables/functions from custom.js (currentLlmSessionId, stagedContextItems,
  * updateContextUsageDisplay, fetchAndDisplayWorkspaceItems).
@@ -31,20 +31,19 @@ function appendMessageToChat(
   const $messageDiv = $("<div>", {
     id: messageId,
     class: `message-bubble ${sender === "user" ? "user-message" : "agent-message"} ${isError ? "error-message-bubble" : ""}`,
-    html: escapeHtml(text), // Ensure text is escaped
+    // text content is safer than html if text might contain HTML-like strings by mistake
+    text: text, // Using .text() to prevent accidental HTML injection from message content itself
   });
 
   if (persistentMessageId) {
     $messageDiv.attr("data-message-id", persistentMessageId);
-    // Actions are added dynamically after stream for agent messages, or directly for loaded user messages.
-    // For consistency, actions for existing messages (loaded from history) should also be added here.
     const actionsHtml = `
           <div class="message-actions mt-1">
               <button class="btn btn-sm btn-outline-light btn-copy-message" title="Copy"><i class="fas fa-copy fa-xs"></i></button>
               <button class="btn btn-sm btn-outline-light btn-add-workspace" title="Add to Workspace"><i class="fas fa-plus-square fa-xs"></i></button>
               <button class="btn btn-sm btn-outline-light btn-delete-message" title="Delete Message"><i class="fas fa-trash fa-xs"></i></button>
           </div>`;
-    $messageDiv.append(actionsHtml);
+    $messageDiv.append(actionsHtml); // Actions are trusted HTML
   }
 
   $chatMessages.prepend($messageDiv);
@@ -52,9 +51,63 @@ function appendMessageToChat(
 }
 
 /**
+ * Appends content to the Raw LLM Output display.
+ * Prepends new responses with a timestamp and separator.
+ * @param {string} content - The raw content to append.
+ * @param {boolean} isNewResponseSegment - True if this is the start of a new LLM response, false if it's a continuing chunk.
+ */
+function appendRawOutput(content, isNewResponseSegment) {
+  const $rawOutputDisplay = $("#raw-llm-output-display");
+  let currentRawContent = $rawOutputDisplay.text();
+
+  if (isNewResponseSegment) {
+    const timestamp = new Date().toLocaleTimeString();
+    const separator = `\n\n--- Raw Output at ${timestamp} ---\n`;
+    // Prepend new response to existing content
+    $rawOutputDisplay.text(separator + content + currentRawContent);
+  } else {
+    // For streaming chunks, we need to append to the *current* response block.
+    // This means finding the last separator and appending after it, or to the start if no separator yet.
+    const lastSeparatorIndex = currentRawContent.indexOf("--- Raw Output at");
+    if (isNewResponseSegment && lastSeparatorIndex !== -1) {
+      // Should be caught by isNewResponseSegment logic above
+      // This case should not happen if isNewResponseSegment logic is correct.
+      // Defensive: prepend if somehow isNewResponseSegment is true but we're in a stream.
+      $rawOutputDisplay.text(content + currentRawContent);
+    } else if (lastSeparatorIndex !== -1) {
+      // Append to the latest block
+      const beforeLastBlock = currentRawContent.substring(
+        0,
+        lastSeparatorIndex,
+      );
+      let lastBlockContent = currentRawContent.substring(lastSeparatorIndex);
+      // Find the end of the "--- Raw Output at TIMESTAMP ---" line to append after it
+      const endOfSeparatorLine = lastBlockContent.indexOf("\n") + 1;
+      lastBlockContent =
+        lastBlockContent.substring(0, endOfSeparatorLine) +
+        content +
+        lastBlockContent.substring(endOfSeparatorLine);
+      $rawOutputDisplay.text(beforeLastBlock + lastBlockContent);
+    } else {
+      // No separator yet, just prepend (or append if it's the very first chunk of the very first message)
+      // To ensure chunks append correctly for the *first* message before a separator is added:
+      if ($rawOutputDisplay.data("is-streaming-first-response")) {
+        $rawOutputDisplay.text(currentRawContent + content);
+      } else {
+        // This case is for the very first chunk of a new response if the display was empty.
+        // It will be caught by isNewResponseSegment=true on the next call.
+        // For now, just set it.
+        $rawOutputDisplay.text(content + currentRawContent); // Prepend if no stream state
+      }
+    }
+  }
+}
+
+/**
  * Sends the chat message to the backend and handles streaming response.
  * Accesses global currentLlmSessionId and stagedContextItems.
  * Calls global updateContextUsageDisplay.
+ * Updates Raw Output tab.
  */
 async function sendMessage() {
   const messageText = $("#chat-input").val().trim();
@@ -68,10 +121,19 @@ async function sendMessage() {
     return;
   }
 
-  appendMessageToChat(messageText, "user"); // User message doesn't get actions immediately this way, but matches existing logic.
-  // If actions are desired for user messages, persistentMessageId needs to be handled.
+  // Indicate start of a new response for raw output
+  // For the very first response, we might not have a separator yet.
+  if ($("#raw-llm-output-display").text().length === 0) {
+    $("#raw-llm-output-display").data("is-streaming-first-response", true);
+  } else {
+    $("#raw-llm-output-display").data("is-streaming-first-response", false);
+  }
+  // The first actual chunk/response will call appendRawOutput with isNewResponseSegment = true
+  let rawOutputIsNewResponseSegment = true;
+
+  appendMessageToChat(messageText, "user");
   $("#chat-input").val("");
-  updateChatInputTokenEstimate(); // Assumes this function is globally available from custom.js
+  updateChatInputTokenEstimate();
 
   const agentMessageElementId = `agent-msg-${Date.now()}`;
   appendMessageToChat(
@@ -90,7 +152,7 @@ async function sendMessage() {
         message: messageText,
         session_id: currentLlmSessionId,
         stream: true,
-        active_context_specification: stagedContextItems, // Uses global stagedContextItems
+        active_context_specification: stagedContextItems,
       }),
     });
 
@@ -99,17 +161,20 @@ async function sendMessage() {
         .json()
         .catch(() => ({ error: "Unknown server error" }));
       console.error("Chat API error response:", errorData);
+      const errorMessage = errorData.error || response.statusText;
       $(`#${agentMessageElementId}`).html(
-        `<span class="text-danger">Error: ${escapeHtml(errorData.error || response.statusText)}</span>`,
+        `<span class="text-danger">Error: ${escapeHtml(errorMessage)}</span>`,
       );
-      updateContextUsageDisplay(null); // Assumes this function is globally available
+      appendRawOutput(`Error: ${errorMessage}`, rawOutputIsNewResponseSegment);
+      rawOutputIsNewResponseSegment = false; // Subsequent raw output for this error is part of the same "response"
+      updateContextUsageDisplay(null);
       return;
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let accumulatedContent = "";
+    let accumulatedContent = ""; // For chat display
     let persistentMsgId = null;
     const actionsHtml = `
         <div class="message-actions mt-1">
@@ -133,9 +198,17 @@ async function sendMessage() {
             const eventData = JSON.parse(line.substring(6));
             if (eventData.type === "chunk") {
               accumulatedContent += eventData.content;
+              // Update chat display with HTML escaped content
               $(`#${agentMessageElementId}`).html(
                 escapeHtml(accumulatedContent),
               );
+              // Append raw content to raw output display
+              appendRawOutput(eventData.content, rawOutputIsNewResponseSegment);
+              rawOutputIsNewResponseSegment = false; // Subsequent chunks are part of the same response
+              $("#raw-llm-output-display").data(
+                "is-streaming-first-response",
+                false,
+              ); // No longer the first overall response
             } else if (
               eventData.type === "full_response_id" &&
               eventData.message_id
@@ -152,7 +225,7 @@ async function sendMessage() {
                 $(`#${agentMessageElementId}`).append(actionsHtml);
               }
             } else if (eventData.type === "context_usage" && eventData.data) {
-              updateContextUsageDisplay(eventData.data); // Assumes global
+              updateContextUsageDisplay(eventData.data);
             } else if (eventData.type === "end") {
               console.log("Stream ended by server.");
               if (
@@ -170,11 +243,25 @@ async function sendMessage() {
               ) {
                 $(`#${agentMessageElementId}`).append(actionsHtml);
               }
+              $("#raw-llm-output-display").data(
+                "is-streaming-first-response",
+                false,
+              );
               return;
             } else if (eventData.type === "error") {
               console.error("SSE Error Event:", eventData.error);
+              const sseErrorMessage = eventData.error;
               $(`#${agentMessageElementId}`).html(
-                `<span class="text-danger">Stream Error: ${escapeHtml(eventData.error)}</span>`,
+                `<span class="text-danger">Stream Error: ${escapeHtml(sseErrorMessage)}</span>`,
+              );
+              appendRawOutput(
+                `Stream Error: ${sseErrorMessage}`,
+                rawOutputIsNewResponseSegment,
+              );
+              rawOutputIsNewResponseSegment = false;
+              $("#raw-llm-output-display").data(
+                "is-streaming-first-response",
+                false,
               );
               return;
             }
@@ -184,8 +271,7 @@ async function sendMessage() {
         }
       }
     }
-    // Final update of content and actions if not already done by 'end' or 'full_response_id'
-    // This part might be redundant if the 'end' event always fires and handles it.
+    // Final update of chat content and actions if not already done by 'end' or 'full_response_id'
     $(`#${agentMessageElementId}`).html(escapeHtml(accumulatedContent));
     if (
       !$(`#${agentMessageElementId}`).attr("data-message-id") &&
@@ -199,12 +285,21 @@ async function sendMessage() {
     ) {
       $(`#${agentMessageElementId}`).append(actionsHtml);
     }
+    $("#raw-llm-output-display").data("is-streaming-first-response", false);
   } catch (error) {
     console.error("Error sending message:", error);
+    const catchErrorMessage =
+      error.message || "Could not connect to chat service.";
     $(`#${agentMessageElementId}`).html(
-      `<span class="text-danger">Error: Could not connect to chat service. ${escapeHtml(error.message || "")}</span>`,
+      `<span class="text-danger">Error: ${escapeHtml(catchErrorMessage)}</span>`,
     );
-    updateContextUsageDisplay(null); // Assumes global
+    appendRawOutput(
+      `Error: ${catchErrorMessage}`,
+      rawOutputIsNewResponseSegment,
+    );
+    // rawOutputIsNewResponseSegment = false; // Not strictly needed here as we return
+    updateContextUsageDisplay(null);
+    $("#raw-llm-output-display").data("is-streaming-first-response", false);
   }
 }
 
@@ -231,7 +326,7 @@ function initChatEventListeners() {
       .children(".message-actions")
       .remove()
       .end()
-      .text()
+      .text() // Use .text() to get the pure text content
       .trim();
     navigator.clipboard
       .writeText(messageContent)
@@ -270,8 +365,11 @@ function initChatEventListeners() {
           `Message added to workspace as item: ${escapeHtml(response.id)}`,
           "success",
         );
-        if ($("#context-manager-tab-btn").hasClass("active")) {
-          fetchAndDisplayWorkspaceItems(); // Assumes global
+        if (
+          typeof fetchAndDisplayWorkspaceItems === "function" &&
+          $("#context-manager-tab-btn").hasClass("active")
+        ) {
+          fetchAndDisplayWorkspaceItems();
         }
       },
       error: function (jqXHR, textStatus, errorThrown) {
