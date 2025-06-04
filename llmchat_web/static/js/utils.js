@@ -102,3 +102,59 @@ function showToast(
     this.remove();
   });
 }
+
+/**
+ * Updates the context usage display in the top status bar.
+ * @param {object | null} contextUsage - Object with tokens_used and max_tokens, or null.
+ */
+function updateContextUsageDisplay(contextUsage) {
+  const $contextUsageEl = $("#status-context-usage");
+  if (
+    contextUsage &&
+    contextUsage.tokens_used !== undefined &&
+    contextUsage.tokens_used !== null &&
+    contextUsage.max_tokens !== undefined &&
+    contextUsage.max_tokens !== null
+  ) {
+    const percentage =
+      contextUsage.max_tokens > 0
+        ? ((contextUsage.tokens_used / contextUsage.max_tokens) * 100).toFixed(
+            1,
+          )
+        : 0;
+    $contextUsageEl.text(
+      `${contextUsage.tokens_used}/${contextUsage.max_tokens} (${percentage}%)`,
+    );
+    if (percentage > 85) {
+      $contextUsageEl
+        .removeClass("bg-info bg-success bg-warning")
+        .addClass("bg-danger");
+    } else if (percentage > 60) {
+      $contextUsageEl
+        .removeClass("bg-info bg-success bg-danger")
+        .addClass("bg-warning");
+    } else {
+      $contextUsageEl
+        .removeClass("bg-info bg-warning bg-danger")
+        .addClass("bg-success");
+    }
+  } else {
+    $contextUsageEl
+      .text("N/A")
+      .removeClass("bg-success bg-warning bg-danger")
+      .addClass("bg-info");
+  }
+  // console.log("UTILS: Context usage display updated."); // Optional: for debugging
+}
+
+/**
+ * Updates the token estimate display for the chat input.
+ */
+function updateChatInputTokenEstimate() {
+  const text = $("#chat-input").val();
+  // A very rough estimate: 1 token ~ 4 chars in English.
+  // This can be significantly off for code or other languages.
+  const estimatedTokens = Math.ceil(text.length / 4);
+  $("#chat-input-token-estimate").text(`Tokens: ~${estimatedTokens}`);
+  // console.log("UTILS: Chat input token estimate updated."); // Optional: for debugging
+}

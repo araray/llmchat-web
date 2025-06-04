@@ -27,21 +27,17 @@
         <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
         <!-- Ensure utils.js is loaded before other custom scripts -->
         <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
-        <!-- session_api.js provides functions called by custom.js -->
+        <!-- API modules -->
         <script src="{{ url_for('static', filename='js/session_api.js') }}"></script>
-        <!-- chat_ui.js provides chat interaction logic -->
+        <!-- UI modules -->
         <script src="{{ url_for('static', filename='js/chat_ui.js') }}"></script>
-        <!-- rag_ui.js provides RAG UI logic -->
         <script src="{{ url_for('static', filename='js/rag_ui.js') }}"></script>
-        <!-- llm_settings_ui.js provides LLM settings UI logic -->
         <script src="{{ url_for('static', filename='js/llm_settings_ui.js') }}"></script>
-        <!-- context_manager_ui.js provides Context Manager UI logic -->
         <script src="{{ url_for('static', filename='js/context_manager_ui.js') }}"></script>
-        <!-- prompt_template_ui.js provides Prompt Template Values UI logic -->
         <script src="{{ url_for('static', filename='js/prompt_template_ui.js') }}"></script>
-        <!-- ingestion_ui.js provides Data Ingestion UI logic -->
         <script src="{{ url_for('static', filename='js/ingestion_ui.js') }}"></script>
-        <script src="{{ url_for('static', filename='js/custom.js') }}"></script>
+        <!-- Main controller/initializer, loaded last -->
+        <script src="{{ url_for('static', filename='js/main_controller.js') }}"></script>
         {% block scripts_extra %}{% endblock %}
     </body>
 </html>
