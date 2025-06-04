@@ -3,11 +3,10 @@
 Main Flask application file for llmchat-web.
 
 This application initializes the Flask app, LLMCore, logging,
-and registers blueprints for routing. Core route logic is now in routes.py.
-The main_bp Blueprint is now defined here to avoid circular imports.
-LLMCore initialization is now attempted at module load time to support
-Gunicorn workers, in addition to being called by external startup mechanisms
-or direct script execution.
+and registers blueprints for routing. Core route logic is now in the 'routes'
+sub-package. LLMCore initialization is attempted at module load time
+to support Gunicorn workers, in addition to being called by external
+startup mechanisms or direct script execution.
 
 SECRET_KEY Fallback Strategy:
 To ensure session consistency across Gunicorn workers when FLASK_SECRET_KEY
@@ -46,7 +45,7 @@ if __name__ == "__main__" and (__package__ is None or __package__ == ''):
 # --- End: Fix for direct script execution ---
 
 import asyncio
-import json # Retained for potential direct use, though routes handle most JSON
+import json # Retained for potential direct use
 import logging
 import secrets # Used for Flask secret key
 import uuid # Used for generating session IDs
@@ -54,7 +53,7 @@ from functools import wraps # For decorators
 from typing import Any, Callable, Coroutine, Optional, Dict, Union, AsyncGenerator # Type hinting
 from importlib.metadata import version, PackageNotFoundError # Added for app versioning
 
-from flask import Flask, jsonify, render_template, request, Response, stream_with_context, Blueprint
+from flask import Flask, jsonify, render_template, request, Response, stream_with_context # Blueprint removed
 from flask import session as flask_session # Alias to avoid confusion with LLMCore's session
 from llmcore import LLMCore, LLMCoreError, ConfigError as LLMCoreConfigError
 from llmcore import ProviderError, ContextLengthError, SessionNotFoundError
@@ -66,7 +65,7 @@ try:
     APP_VERSION = version("llmchat-web")
 except PackageNotFoundError:
     # Fallback version if llmchat-web is not installed (e.g., running source directly)
-    APP_VERSION = "0.2.6-dev" # Ensure this matches the intended version in pyproject.toml
+    APP_VERSION = "0.2.9-dev" # Ensure this matches the intended version in pyproject.toml
     logging.getLogger("llmchat_web_startup").info(
         f"llmchat-web package not found (or not installed), using fallback version: {APP_VERSION}. "
         "This is normal if running directly from source without installation."
@@ -74,9 +73,9 @@ except PackageNotFoundError:
 
 
 # --- Global LLMCore Instance ---
-# This instance will be imported by routes.py
+# This instance will be imported by route modules within the 'routes' package.
 llmcore_instance: Optional[LLMCore] = None
-llmcore_init_error: Optional[str] = None
+llmcore_init_error: Optional[str] = None # Renamed for clarity from global_llmcore_init_error
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -90,9 +89,6 @@ logger.setLevel(logging.DEBUG) # Keep debug for web development, can be configur
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
-
-# Define the main Blueprint here to be imported by routes.py
-main_bp = Blueprint('main_bp', __name__)
 
 # --- Generate Flask SECRET_KEY fallback once at module load ---
 # This ensures all Gunicorn workers share the same fallback key if
@@ -204,7 +200,7 @@ if llmcore_instance is None and llmcore_init_error is None:
         llmcore_instance = None
 
 
-# --- Async to Sync Wrapper for Flask Routes (used by routes.py) ---
+# --- Async to Sync Wrapper for Flask Routes (used by route modules) ---
 def async_to_sync_in_flask(f: Callable[..., Coroutine[Any, Any, Any]]) -> Callable[..., Any]:
     """
     Decorator to run an async function synchronously in a Flask context.
@@ -256,7 +252,7 @@ def async_to_sync_in_flask(f: Callable[..., Coroutine[Any, Any, Any]]) -> Callab
                  logger.debug("Not closing event loop as it was pre-existing and is managed elsewhere.")
     return wrapper
 
-# --- Session Helper Functions (used by routes.py) ---
+# --- Session Helper Functions (used by route modules) ---
 def get_current_web_session_id() -> Optional[str]:
     """Retrieves the LLMCore session ID stored in the Flask session."""
     return flask_session.get('current_llm_session_id')
@@ -288,12 +284,18 @@ async def get_context_usage_info(session_id: Optional[str]) -> Optional[Dict[str
     return None
 
 
-# --- Register Blueprints ---
-# Import routes AFTER app, main_bp are defined, and after LLMCore init attempt.
-# llmcore_instance might be None here if init failed, routes.py checks for it at runtime.
-from . import routes  # This executes routes.py, attaching routes to main_bp
-app.register_blueprint(main_bp) # Register the blueprint that routes.py has now populated
-logger.info("Main blueprint registered.")
+# --- Register Blueprints from the 'routes' sub-package ---
+# Import the routes sub-package. This will execute llmchat_web/routes/__init__.py,
+# which in turn should import all individual route modules (once they are created),
+# causing routes to be registered on the blueprints defined there.
+from . import routes as routes_package # 'routes' is now a package
+
+# Register all blueprints defined in routes_package.all_blueprints
+for bp in routes_package.all_blueprints:
+    app.register_blueprint(bp)
+    logger.info(f"Registered blueprint '{bp.name}' with url_prefix '{bp.url_prefix}'.")
+
+logger.info(f"All blueprints from 'llmchat_web.routes' package registered.")
 
 
 # --- Main Execution (for direct run, e.g., python -m llmchat_web.app) ---
