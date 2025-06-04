@@ -4,7 +4,7 @@ Flask routes for the llmchat-web application.
 Organized into a blueprint for modularity.
 Routes are defined here and decorate the `main_bp` Blueprint
 which is imported from the main app module.
-Includes SSE progress reporting for file ingestion.
+Includes SSE progress reporting for file ingestion and a new command endpoint.
 """
 import asyncio
 import json
@@ -1303,3 +1303,41 @@ def ingest_data_route() -> Response:
 
     # Use run_async_generator_synchronously for dir_zip and git types as well
     return Response(stream_with_context(run_async_generator_synchronously(stream_other_ingestion_types_sse_async_gen)), mimetype='text/event-stream')
+
+
+# --- New Command Endpoint ---
+@main_bp.route("/api/command", methods=["POST"])
+@async_to_sync_in_flask # Use the wrapper for consistency, even if initial logic is simple
+async def api_command_route():
+    """
+    Handles commands submitted from the UI's command tab.
+    Currently, this is a placeholder and will echo the command back.
+    Future enhancements could involve parsing and executing commands,
+    potentially interacting with LLMCore or other system components.
+    """
+    data = request.json
+    if not data or "command" not in data:
+        logger.warning("Command API called without 'command' field in JSON payload.")
+        return jsonify({"error": "No command provided."}), 400
+
+    command_text = data["command"]
+    logger.info(f"Received command via API: '{command_text}'")
+
+    # Placeholder: Echo command or simple acknowledgement
+    # In the future, this is where command parsing and execution logic would go.
+    # For example, one might check:
+    # if command_text.startswith("/llmcore_status"):
+    #     status = await llmcore_instance.get_status() # Hypothetical method
+    #     return jsonify({"output": f"LLMCore Status: {status}"})
+    # elif command_text.startswith("/clear_session_cache"):
+    #     # some_action()
+    #     return jsonify({"output": "Session cache cleared."})
+    # else:
+    #     return jsonify({"output": f"Unknown command: {command_text}"})
+
+    response_output = f"Command received: '{command_text}'. (Execution not yet implemented.)"
+    return jsonify({
+        "command_received": command_text,
+        "output": response_output,
+        "status": "acknowledged_placeholder"
+    })
