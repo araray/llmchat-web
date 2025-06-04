@@ -81,7 +81,9 @@ if not APYKATU_AVAILABLE:
         class IngestionPipeline: # type: ignore
             def __init__(self, *args: Any, **kwargs: Any) -> None: pass
             async def run(self, *args: Any, **kwargs: Any) -> None: pass
-    if apykatu_process_file_path_api is None: async def apykatu_process_file_path_api(*args: Any, **kwargs: Any) -> Any: return ([], type('Stats', (object,), {'error_messages': ['Apykatu not available']})()) # type: ignore
+    if apykatu_process_file_path_api is None:
+        async def apykatu_process_file_path_api(*args: Any, **kwargs: Any) -> Any: # Corrected syntax
+            return ([], type('Stats', (object,), {'error_messages': ['Apykatu not available']})()) # type: ignore
     if ApykatuConfigError is None: ApykatuConfigError = type('ApykatuConfigError', (Exception,), {}) # type: ignore
     if ApykatuProcessedChunk is None: ApykatuProcessedChunk = type('ApykatuProcessedChunk', (object,), {}) # type: ignore
     if ApykatuProcessingStats is None: ApykatuProcessingStats = type('ApykatuProcessingStats', (object,), {}) # type: ignore
@@ -191,6 +193,7 @@ async def stream_file_ingestion_progress(uploaded_files: List[Any], collection_n
         file_status = "pending"
         file_error_msg: Optional[str] = None
         chunks_this_file = 0
+        temp_file_path_local: Optional[Path] = None # Define here to ensure it's in scope for finally
         try:
             if not uploaded_file_storage or not uploaded_file_storage.filename:
                 logger.warning(f"Skipping invalid file upload object at index {i} for collection '{collection_name}'.")
@@ -205,13 +208,13 @@ async def stream_file_ingestion_progress(uploaded_files: List[Any], collection_n
             yield f"data: {json.dumps({'type': 'file_start', 'filename': filename, 'file_index': i, 'total_files': total_files})}\n\n"
             await asyncio.sleep(0.01)
 
-            temp_file_path = temp_dir / filename
-            uploaded_file_storage.save(str(temp_file_path)) # Ensure path is string for save()
-            logger.info(f"Processing uploaded file ({i+1}/{total_files}): '{filename}' for collection '{collection_name}' from path '{temp_file_path}'.")
+            temp_file_path_local = temp_dir / filename # Assign to the scoped variable
+            uploaded_file_storage.save(str(temp_file_path_local)) # Ensure path is string for save()
+            logger.info(f"Processing uploaded file ({i+1}/{total_files}): '{filename}' for collection '{collection_name}' from path '{temp_file_path_local}'.")
 
             # Call Apykatu's API to process the file
             processed_chunks_apy, api_stats_obj_apy = await apykatu_process_file_path_api( # type: ignore
-                file_path=temp_file_path, config=apykatu_cfg, generate_embeddings=True
+                file_path=temp_file_path_local, config=apykatu_cfg, generate_embeddings=True
             )
             # Cast to specific types if available, for type checking benefits
             processed_chunks: List[ApykatuProcessedChunk] = processed_chunks_apy # type: ignore
@@ -274,11 +277,11 @@ async def stream_file_ingestion_progress(uploaded_files: List[Any], collection_n
             await asyncio.sleep(0.01)
         finally:
             # Clean up individual temp file if it exists
-            if 'temp_file_path' in locals() and temp_file_path.exists(): # type: ignore
+            if temp_file_path_local and temp_file_path_local.exists():
                 try:
-                    temp_file_path.unlink() # type: ignore
+                    temp_file_path_local.unlink()
                 except OSError as e_unlink:
-                    logger.warning(f"Could not delete temporary file {temp_file_path}: {e_unlink}") # type: ignore
+                    logger.warning(f"Could not delete temporary file {temp_file_path_local}: {e_unlink}")
 
     # Final summary event
     summary_status = "no_files_processed"
