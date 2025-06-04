@@ -45,16 +45,16 @@ if __name__ == "__main__" and (__package__ is None or __package__ == ''):
 # --- End: Fix for direct script execution ---
 
 import asyncio
-import json # Retained for potential direct use
+import json
 import logging
-import secrets # Used for Flask secret key
-import uuid # Used for generating session IDs
-from functools import wraps # For decorators
-from typing import Any, Callable, Coroutine, Optional, Dict, Union, AsyncGenerator # Type hinting
-from importlib.metadata import version, PackageNotFoundError # Added for app versioning
+import secrets
+import uuid
+from functools import wraps
+from typing import Any, Callable, Coroutine, Optional, Dict, Union, AsyncGenerator
+from importlib.metadata import version, PackageNotFoundError
 
-from flask import Flask, jsonify, render_template, request, Response, stream_with_context # Blueprint removed
-from flask import session as flask_session # Alias to avoid confusion with LLMCore's session
+from flask import Flask, jsonify, render_template, request, Response, stream_with_context
+from flask import session as flask_session
 from llmcore import LLMCore, LLMCoreError, ConfigError as LLMCoreConfigError
 from llmcore import ProviderError, ContextLengthError, SessionNotFoundError
 from llmcore.models import Message as LLMCoreMessage, ChatSession as LLMCoreChatSession, Role as LLMCoreRole
@@ -251,6 +251,64 @@ def async_to_sync_in_flask(f: Callable[..., Coroutine[Any, Any, Any]]) -> Callab
             elif not created_loop:
                  logger.debug("Not closing event loop as it was pre-existing and is managed elsewhere.")
     return wrapper
+
+# --- run_async_generator_synchronously (moved here from chat_routes.py) ---
+def run_async_generator_synchronously(async_gen_func: Callable[..., AsyncGenerator[str, None]], *args: Any, **kwargs: Any) -> Any:
+    """
+    Runs an asynchronous generator function synchronously.
+    This is a utility for Flask routes that need to use `stream_with_context`
+    with an async generator, especially in environments where Flask runs
+    with synchronous workers (like default Gunicorn).
+
+    It creates a new event loop, runs the async generator to completion within that loop,
+    and yields its items. Ensures proper cleanup of the created event loop.
+
+    Args:
+        async_gen_func: The asynchronous generator function to run.
+        *args: Positional arguments to pass to `async_gen_func`.
+        **kwargs: Keyword arguments to pass to `async_gen_func`.
+
+    Yields:
+        Items from the asynchronous generator.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    # Use the main app logger or a specific utility logger if preferred
+    utility_logger = logging.getLogger("llmchat_web.utils.async_gen_sync_runner")
+    utility_logger.debug(f"Created new event loop for run_async_generator_synchronously of {async_gen_func.__name__}")
+    try:
+        async_gen = async_gen_func(*args, **kwargs)
+        while True:
+            try:
+                item = loop.run_until_complete(async_gen.__anext__())
+                yield item
+            except StopAsyncIteration:
+                utility_logger.debug(f"Async generator {async_gen_func.__name__} completed.")
+                break
+            except Exception as e_inner: # Catch errors from within the generator's iteration
+                utility_logger.error(f"Error during iteration of async generator {async_gen_func.__name__}: {e_inner}", exc_info=True)
+                break # Stop iteration on error
+    finally:
+        utility_logger.debug(f"Cleaning up event loop for run_async_generator_synchronously of {async_gen_func.__name__}.")
+        try:
+            # Gracefully shutdown tasks and async generators in the created loop
+            async def _shutdown_loop_tasks(current_loop: asyncio.AbstractEventLoop):
+                tasks = [t for t in asyncio.all_tasks(loop=current_loop) if t is not asyncio.current_task(loop=current_loop)]
+                if tasks:
+                    utility_logger.debug(f"Cancelling {len(tasks)} outstanding tasks in sync generator's loop for {async_gen_func.__name__}.")
+                    for task in tasks: task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                utility_logger.debug(f"Shutting down async generators in sync generator's loop for {async_gen_func.__name__}.")
+                await current_loop.shutdown_asyncgens()
+            loop.run_until_complete(_shutdown_loop_tasks(loop))
+        except Exception as e_shutdown:
+            utility_logger.error(f"Error during shutdown of tasks/asyncgens in sync generator's loop for {async_gen_func.__name__}: {e_shutdown}")
+        finally:
+            loop.close()
+            utility_logger.debug(f"Event loop for {async_gen_func.__name__} closed.")
+            # If this loop was set as the current loop for the policy, clear it.
+            if asyncio.get_event_loop_policy().get_event_loop() is loop:
+                asyncio.set_event_loop(None)
 
 # --- Session Helper Functions (used by route modules) ---
 def get_current_web_session_id() -> Optional[str]:
