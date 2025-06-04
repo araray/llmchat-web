@@ -9,7 +9,8 @@
  * RAG controls, data ingestion (now with SSE for files), LLM settings,
  * direct RAG search, prompt template values, and basic command tab interaction.
  *
- * Utility functions (escapeHtml, showToast) have been moved to utils.js.
+ * Utility functions (escapeHtml, showToast) are in utils.js.
+ * Session API call functions (apiFetchSessions, etc.) are in session_api.js.
  */
 
 // Global variable to store the current LLMCore session ID for the web client
@@ -157,14 +158,12 @@ function fetchAndUpdateInitialStatus() {
 
 /**
  * Fetches and displays the list of available sessions.
+ * Uses apiFetchSessions from session_api.js
  */
 function fetchAndDisplaySessions() {
-  console.log("Fetching sessions...");
-  $.ajax({
-    url: "/api/sessions",
-    type: "GET",
-    dataType: "json",
-    success: function (sessions) {
+  console.log("Fetching sessions via apiFetchSessions...");
+  apiFetchSessions()
+    .done(function (sessions) {
       const $sessionList = $("#session-list").empty();
       if (sessions && sessions.length > 0) {
         sessions.forEach(function (session) {
@@ -189,14 +188,13 @@ function fetchAndDisplaySessions() {
           '<p class="text-muted small m-2">No saved sessions found.</p>',
         );
       }
-    },
-    error: function (jqXHR, textStatus, errorThrown) {
+    })
+    .fail(function (jqXHR, textStatus, errorThrown) {
       console.error("Error fetching sessions:", textStatus, errorThrown);
       $("#session-list").html(
         '<p class="text-danger small m-2">Error loading sessions.</p>',
       );
-    },
-  });
+    });
 }
 
 /**
@@ -1200,27 +1198,24 @@ $(document).ready(function () {
     );
   }
 
-  fetchAndUpdateInitialStatus(); // This is the call that was failing.
+  fetchAndUpdateInitialStatus();
 
   // Event handlers from the original custom.js, adapted to use global state variables
   // and new/updated functions.
 
+  // --- Session Management Event Handlers ---
   $("#btn-new-session").on("click", function () {
     console.log("New session button clicked.");
-    $.ajax({
-      url: "/api/sessions/new",
-      type: "POST",
-      dataType: "json",
-      success: function (newSessionResponse) {
-        // Renamed variable
+    apiCreateNewSession() // Uses function from session_api.js
+      .done(function (newSessionResponse) {
         console.log("New session created:", newSessionResponse);
-        currentLlmSessionId = newSessionResponse.id; // Assuming 'id' is directly on the response
+        currentLlmSessionId = newSessionResponse.id;
         $("#chat-messages")
           .empty()
           .append(
             '<div class="message-bubble agent-message">New session started.</div>',
           );
-        // Update global JS state from newSessionResponse.rag_settings, .llm_settings, .prompt_template_values
+
         if (newSessionResponse.rag_settings)
           currentRagSettings = newSessionResponse.rag_settings;
         if (newSessionResponse.llm_settings)
@@ -1229,35 +1224,31 @@ $(document).ready(function () {
           currentPromptTemplateValues =
             newSessionResponse.prompt_template_values;
 
-        fetchAndDisplaySessions(); // Refresh session list
-        // Update UI based on the new global states
+        fetchAndDisplaySessions();
         updateRagControlsState();
-        fetchAndPopulateLlmProviders(); // This will also handle models and system message via currentLlmSettings
+        fetchAndPopulateLlmProviders();
         fetchAndDisplaySystemMessage();
         renderPromptTemplateValuesTable();
-        updateContextUsageDisplay(null); // Reset context usage for new session
+        updateContextUsageDisplay(null);
 
         stagedContextItems = [];
         renderStagedContextItems();
         if ($("#context-manager-tab-btn").hasClass("active")) {
           fetchAndDisplayWorkspaceItems();
         }
-      },
-      error: function (jqXHR, textStatus, errorThrown) {
+      })
+      .fail(function (jqXHR, textStatus, errorThrown) {
         console.error("Error creating new session:", textStatus, errorThrown);
         showToast("Error", "Failed to create new session.", "danger");
-      },
-    });
+      });
   });
+
   $("#session-list").on("click", ".list-group-item", function (e) {
     e.preventDefault();
     const sessionIdToLoad = $(this).data("session-id");
     console.log(`Loading session: ${sessionIdToLoad}`);
-    $.ajax({
-      url: `/api/sessions/${sessionIdToLoad}/load`,
-      type: "GET",
-      dataType: "json",
-      success: function (response) {
+    apiLoadSession(sessionIdToLoad) // Uses function from session_api.js
+      .done(function (response) {
         console.log("Session loaded response:", response);
         const loadedSessionData = response.session_data;
         const appliedSettings = response.applied_settings;
@@ -1285,7 +1276,6 @@ $(document).ready(function () {
           );
         }
 
-        // Update global JS state from appliedSettings
         if (appliedSettings) {
           currentRagSettings = {
             enabled: appliedSettings.rag_enabled,
@@ -1302,9 +1292,7 @@ $(document).ready(function () {
             appliedSettings.prompt_template_values || {};
         }
 
-        fetchAndDisplaySessions(); // Refresh session list (highlights active)
-        // Update UI based on the new global states
-        // These are now more directly updated from appliedSettings
+        fetchAndDisplaySessions();
         $("#status-provider").text(currentLlmSettings.providerName || "N/A");
         $("#status-model").text(currentLlmSettings.modelName || "N/A");
         $("#system-message-input").val(currentLlmSettings.systemMessage);
@@ -1312,36 +1300,36 @@ $(document).ready(function () {
           $("#llm-provider-select").val() !== currentLlmSettings.providerName
         ) {
           $("#llm-provider-select").val(currentLlmSettings.providerName);
-          fetchAndPopulateLlmModels(currentLlmSettings.providerName); // This will also set model dropdown
+          fetchAndPopulateLlmModels(currentLlmSettings.providerName);
         } else if (
           $("#llm-model-select").val() !== currentLlmSettings.modelName
         ) {
           $("#llm-model-select").val(currentLlmSettings.modelName);
         }
 
-        updateRagControlsState(); // Updates RAG UI from currentRagSettings
+        updateRagControlsState();
         if (
           $("#rag-collection-select").val() !==
           currentRagSettings.collectionName
         ) {
-          fetchAndPopulateRagCollections(); // This will also set collection dropdown
+          fetchAndPopulateRagCollections();
         }
 
-        renderPromptTemplateValuesTable(); // Updates prompt values table
-        updateContextUsageDisplay(null); // Or try to get from session if available
+        renderPromptTemplateValuesTable();
+        updateContextUsageDisplay(null);
 
-        stagedContextItems = []; // Clear client-side staged items for new session
+        stagedContextItems = [];
         renderStagedContextItems();
         if ($("#context-manager-tab-btn").hasClass("active")) {
           fetchAndDisplayWorkspaceItems();
         }
-      },
-      error: function (jqXHR, textStatus, errorThrown) {
+      })
+      .fail(function (jqXHR, textStatus, errorThrown) {
         console.error("Error loading session:", textStatus, errorThrown);
         showToast("Error", "Failed to load session.", "danger");
-      },
-    });
+      });
   });
+
   $("#btn-delete-session").on("click", function () {
     if (!currentLlmSessionId || $(this).prop("disabled")) return;
     showToast(
@@ -1352,11 +1340,8 @@ $(document).ready(function () {
       function (confirmed) {
         if (confirmed) {
           console.log(`Deleting session: ${currentLlmSessionId}`);
-          $.ajax({
-            url: `/api/sessions/${currentLlmSessionId}`,
-            type: "DELETE",
-            dataType: "json",
-            success: function (response) {
+          apiDeleteSession(currentLlmSessionId) // Uses function from session_api.js
+            .done(function (response) {
               console.log("Session delete response:", response);
               showToast(
                 "Success",
@@ -1369,25 +1354,28 @@ $(document).ready(function () {
                 .append(
                   '<div class="message-bubble agent-message">Session deleted. Start or load a new one.</div>',
                 );
-              fetchAndDisplaySessions(); // Refresh list
-              // Call fetchAndUpdateInitialStatus to reset to defaults or a new temp session state
-              fetchAndUpdateInitialStatus();
+              fetchAndDisplaySessions();
+              fetchAndUpdateInitialStatus(); // Reset to defaults or new temp session
               stagedContextItems = [];
               renderStagedContextItems();
               if ($("#context-manager-tab-btn").hasClass("active")) {
-                fetchAndDisplayWorkspaceItems(); // This might show "no active session"
+                fetchAndDisplayWorkspaceItems();
               }
-            },
-            error: function (jqXHR, textStatus, errorThrown) {
+            })
+            .fail(function (jqXHR, textStatus, errorThrown) {
               console.error("Error deleting session:", textStatus, errorThrown);
-              showToast("Error", "Failed to delete session.", "danger");
-            },
-          });
+              showToast(
+                "Error",
+                jqXHR.responseJSON?.error || "Failed to delete session.",
+                "danger",
+              );
+            });
         }
       },
     );
   });
 
+  // --- Chat Message Handling ---
   $("#send-chat-message").on("click", function () {
     sendMessage();
   });
@@ -1579,6 +1567,7 @@ $(document).ready(function () {
     return messageId;
   }
 
+  // --- Per-Message Action Handlers ---
   $("#chat-messages").on("click", ".btn-copy-message", function () {
     const messageContent = $(this)
       .closest(".message-bubble")
@@ -1690,6 +1679,7 @@ $(document).ready(function () {
     );
   });
 
+  // --- Context Manager Event Handlers ---
   $("#context-manager-tab-btn").on("shown.bs.tab", function (e) {
     fetchAndDisplayWorkspaceItems();
     renderStagedContextItems();
@@ -2030,6 +2020,7 @@ $(document).ready(function () {
     }
   }
 
+  // --- RAG Controls Event Handlers ---
   $("#rag-tab-btn").on("shown.bs.tab", function () {
     fetchAndPopulateRagCollections();
     updateRagControlsState();
@@ -2090,6 +2081,7 @@ $(document).ready(function () {
     handleDirectRagSearch();
   });
 
+  // --- Ingestion Event Handlers ---
   $("#btn-ingest-data").on("click", function () {
     var ingestionModal = new bootstrap.Modal(
       document.getElementById("ingestionModal"),
@@ -2171,6 +2163,7 @@ $(document).ready(function () {
     handleIngestionFormSubmit("git", formData); // Will use fetch for SSE
   });
 
+  // --- Settings Tab Event Handlers ---
   $("#settings-tab-btn").on("shown.bs.tab", function () {
     console.log(
       "Settings tab shown. Initializing LLM controls and prompt values.",
@@ -2341,17 +2334,18 @@ $(document).ready(function () {
     );
   });
 
+  // --- Chat Input Token Estimator ---
   $("#chat-input").on("input", function () {
     updateChatInputTokenEstimate();
   });
   function updateChatInputTokenEstimate() {
     const text = $("#chat-input").val();
-    const estimatedTokens = Math.ceil(text.length / 4);
+    const estimatedTokens = Math.ceil(text.length / 4); // Simple estimation
     $("#chat-input-token-estimate").text(`Tokens: ~${estimatedTokens}`);
   }
-  updateChatInputTokenEstimate();
+  updateChatInputTokenEstimate(); // Initial call
 
-  // Updated REPL Command Input Handler
+  // --- REPL Command Input Handler ---
   $("#repl-command-input").on("keypress", function (e) {
     if (e.key === "Enter") {
       e.preventDefault(); // Prevent default form submission if it's in a form
