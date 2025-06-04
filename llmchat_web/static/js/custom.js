@@ -6,13 +6,13 @@
  * This file handles client-side logic, DOM manipulation, event handling,
  * AJAX calls to the Flask backend, session management,
  * workspace item management, active context specification,
- * data ingestion, LLM settings,
- * prompt template values, and basic command tab interaction.
+ * data ingestion, prompt template values, and basic command tab interaction.
  *
  * Utility functions (escapeHtml, showToast) are in utils.js.
  * Session API call functions (apiFetchSessions, etc.) are in session_api.js.
  * Chat message UI and interaction logic (sendMessage, appendMessageToChat, initChatEventListeners) are in chat_ui.js.
  * RAG UI logic (controls, API calls, search) is in rag_ui.js.
+ * LLM Settings UI logic (provider/model, system message) is in llm_settings_ui.js.
  */
 
 // Global variable to store the current LLMCore session ID for the web client
@@ -30,6 +30,7 @@ let currentRagSettings = {
 };
 
 // Global state for LLM settings (mirrors Flask session, updated via API)
+// This object is accessed and potentially modified by llm_settings_ui.js
 let currentLlmSettings = {
   providerName: null,
   modelName: null,
@@ -43,6 +44,7 @@ let currentPromptTemplateValues = {}; // Object: { "key1": "value1", "key2": "va
 // Session API functions are in session_api.js.
 // Chat UI functions are in chat_ui.js.
 // RAG UI functions are in rag_ui.js.
+// LLM Settings UI functions are in llm_settings_ui.js.
 
 /**
  * Fetches initial status from the backend and updates the UI and global state.
@@ -95,16 +97,18 @@ function fetchAndUpdateInitialStatus() {
 
       $("#status-provider").text(currentLlmSettings.providerName || "N/A");
       $("#status-model").text(currentLlmSettings.modelName || "N/A");
-      // Populate dropdowns and set selected values if settings tab is active or for initial load
-      fetchAndPopulateLlmProviders(); // This will also try to set selected and fetch models
-      fetchAndDisplaySystemMessage(); // This will update the input field
+      // LLM UI population is handled by initLlmSettingsEventListeners and its functions in llm_settings_ui.js
+      if (typeof fetchAndPopulateLlmProviders === "function")
+        fetchAndPopulateLlmProviders();
+      if (typeof fetchAndDisplaySystemMessage === "function")
+        fetchAndDisplaySystemMessage();
 
       // Update RAG Settings from /api/status
       currentRagSettings.enabled = status.rag_enabled || false;
       currentRagSettings.collectionName = status.rag_collection_name;
       currentRagSettings.kValue = status.rag_k_value || 3;
       currentRagSettings.filter = status.rag_filter || null; // Expects dict or null
-      // Functions from rag_ui.js will be responsible for updating UI based on currentRagSettings
+      // RAG UI population is handled by initRagEventListeners and its functions in rag_ui.js
       if (typeof updateRagControlsState === "function")
         updateRagControlsState();
       if (typeof fetchAndPopulateRagCollections === "function")
@@ -112,7 +116,7 @@ function fetchAndUpdateInitialStatus() {
 
       // Update Prompt Template Values from /api/status
       currentPromptTemplateValues = status.prompt_template_values || {};
-      renderPromptTemplateValuesTable();
+      renderPromptTemplateValuesTable(); // This function remains in custom.js for now
 
       // Update context usage display. /api/status doesn't provide this directly.
       // It's typically updated after a chat response. Initialize to N/A.
@@ -444,235 +448,6 @@ function removeStagedContextItem(spec_item_id_to_remove) {
 }
 
 /**
- * Fetches available LLM providers and populates the provider dropdown.
- */
-function fetchAndPopulateLlmProviders() {
-  console.log("Fetching LLM providers...");
-  $.ajax({
-    url: "/api/llm/providers",
-    type: "GET",
-    dataType: "json",
-    success: function (providers) {
-      console.log("LLM Providers received:", providers);
-      const $select = $("#llm-provider-select");
-      $select
-        .empty()
-        .append('<option selected value="">Select Provider...</option>');
-      if (providers && providers.length > 0) {
-        providers.forEach(function (provider) {
-          const providerName =
-            typeof provider === "string"
-              ? provider
-              : provider.name || provider.id;
-          const providerValue =
-            typeof provider === "string"
-              ? provider
-              : provider.id || provider.name;
-          $select.append(
-            $("<option>", {
-              value: providerValue,
-              text: escapeHtml(providerName),
-            }),
-          );
-        });
-        if (currentLlmSettings.providerName) {
-          $select.val(currentLlmSettings.providerName);
-          fetchAndPopulateLlmModels(currentLlmSettings.providerName);
-        }
-      } else {
-        $select.append('<option value="" disabled>No providers found</option>');
-      }
-      $select.prop("disabled", false);
-    },
-    error: function (jqXHR, textStatus, errorThrown) {
-      console.error("Error fetching LLM providers:", textStatus, errorThrown);
-      $("#llm-provider-select")
-        .empty()
-        .append('<option value="" disabled>Error loading providers</option>');
-      $("#llm-model-select")
-        .empty()
-        .append('<option value="">Select provider first</option>')
-        .prop("disabled", true);
-    },
-  });
-}
-
-/**
- * Fetches available models for the selected LLM provider and populates the model dropdown.
- * @param {string} providerName - The name of the selected LLM provider.
- */
-function fetchAndPopulateLlmModels(providerName) {
-  console.log(`Fetching models for provider: ${providerName}...`);
-  const $modelSelect = $("#llm-model-select");
-  $modelSelect
-    .empty()
-    .append('<option selected value="">Loading models...</option>')
-    .prop("disabled", true);
-
-  if (!providerName) {
-    $modelSelect
-      .empty()
-      .append('<option selected value="">Select provider first</option>')
-      .prop("disabled", true);
-    return;
-  }
-
-  $.ajax({
-    url: `/api/llm/providers/${providerName}/models`,
-    type: "GET",
-    dataType: "json",
-    success: function (models) {
-      console.log(`Models for ${providerName}:`, models);
-      $modelSelect
-        .empty()
-        .append('<option selected value="">Select Model...</option>');
-      if (models && models.length > 0) {
-        models.forEach(function (model) {
-          const modelName =
-            typeof model === "string" ? model : model.name || model.id;
-          const modelValue =
-            typeof model === "string" ? model : model.id || model.name;
-          $modelSelect.append(
-            $("<option>", { value: modelValue, text: escapeHtml(modelName) }),
-          );
-        });
-        if (
-          currentLlmSettings.providerName === providerName &&
-          currentLlmSettings.modelName
-        ) {
-          $modelSelect.val(currentLlmSettings.modelName);
-        }
-      } else {
-        $modelSelect.append(
-          '<option value="" disabled>No models found for this provider (or type any)</option>',
-        );
-      }
-      $modelSelect.prop("disabled", false);
-    },
-    error: function (jqXHR, textStatus, errorThrown) {
-      console.error(
-        `Error fetching models for ${providerName}:`,
-        textStatus,
-        errorThrown,
-      );
-      $modelSelect
-        .empty()
-        .append('<option value="" disabled>Error loading models</option>')
-        .prop("disabled", false);
-    },
-  });
-}
-
-/**
- * Sends selected LLM provider and model to the backend.
- */
-function applyLlmSettings() {
-  const providerName = $("#llm-provider-select").val();
-  const modelName = $("#llm-model-select").val();
-
-  if (!providerName) {
-    showToast("Warning", "Please select an LLM provider.", "warning");
-    return;
-  }
-  console.log(
-    `Applying LLM settings: Provider=${providerName}, Model=${modelName}`,
-  );
-
-  $.ajax({
-    url: "/api/settings/llm/update",
-    type: "POST",
-    contentType: "application/json",
-    data: JSON.stringify({
-      provider_name: providerName,
-      model_name: modelName || null,
-    }),
-    dataType: "json",
-    success: function (response) {
-      console.log("LLM settings updated successfully on backend:", response);
-      if (response && response.llm_settings) {
-        currentLlmSettings.providerName = response.llm_settings.provider_name;
-        currentLlmSettings.modelName = response.llm_settings.model_name;
-        $("#status-provider").text(currentLlmSettings.providerName || "N/A");
-        $("#status-model").text(currentLlmSettings.modelName || "N/A");
-        showToast("Success", "LLM settings applied successfully!", "success");
-      }
-      // No need to call fetchAndUpdateInitialStatus here, as this only updates a subset.
-      // The global currentLlmSettings are updated, and UI elements directly related are refreshed.
-    },
-    error: function (jqXHR, textStatus, errorThrown) {
-      console.error(
-        "Error updating LLM settings on backend:",
-        textStatus,
-        errorThrown,
-      );
-      showToast("Error", "Failed to apply LLM settings.", "danger");
-    },
-  });
-}
-
-/**
- * Fetches and displays the current system message for the session.
- */
-function fetchAndDisplaySystemMessage() {
-  console.log("Fetching current system message...");
-  // Use the globally synced currentLlmSettings.systemMessage
-  if (
-    currentLlmSettings.systemMessage !== null &&
-    currentLlmSettings.systemMessage !== undefined
-  ) {
-    $("#system-message-input").val(currentLlmSettings.systemMessage);
-  } else {
-    // Fallback if global state is somehow not set (should be by fetchAndUpdateInitialStatus)
-    $.ajax({
-      url: "/api/settings/system_message",
-      type: "GET",
-      dataType: "json",
-      success: function (response) {
-        console.log("System message received (fallback):", response);
-        if (response && response.system_message !== undefined) {
-          currentLlmSettings.systemMessage = response.system_message;
-          $("#system-message-input").val(response.system_message);
-        }
-      },
-      error: function (jqXHR, textStatus, errorThrown) {
-        console.error(
-          "Error fetching system message (fallback):",
-          textStatus,
-          errorThrown,
-        );
-      },
-    });
-  }
-}
-
-/**
- * Sends the updated system message to the backend.
- */
-function applySystemMessage() {
-  const systemMessage = $("#system-message-input").val();
-  console.log("Applying system message:", systemMessage);
-
-  $.ajax({
-    url: "/api/settings/system_message/update",
-    type: "POST",
-    contentType: "application/json",
-    data: JSON.stringify({ system_message: systemMessage }),
-    dataType: "json",
-    success: function (response) {
-      console.log("System message updated successfully:", response);
-      if (response && response.system_message !== undefined) {
-        currentLlmSettings.systemMessage = response.system_message; // Update global state
-        showToast("Success", "System message applied successfully!", "success");
-      }
-    },
-    error: function (jqXHR, textStatus, errorThrown) {
-      console.error("Error updating system message:", textStatus, errorThrown);
-      showToast("Error", "Failed to apply system message.", "danger");
-    },
-  });
-}
-
-/**
  * Renders the prompt template values in the settings table.
  */
 function renderPromptTemplateValuesTable() {
@@ -905,6 +680,7 @@ async function handleIngestionFormSubmit(ingestType, formData) {
                                              Total Chunks Added: ${summary.total_chunks_added_to_db || 0}
                                              ${errorDetailsHtml}`);
               }
+              // Assuming fetchAndPopulateRagCollections is globally available from rag_ui.js
               if (typeof fetchAndPopulateRagCollections === "function")
                 fetchAndPopulateRagCollections();
               setTimeout(() => $progressContainer.fadeOut(), 3000);
@@ -965,6 +741,8 @@ $(document).ready(function () {
   fetchAndUpdateInitialStatus();
   if (typeof initChatEventListeners === "function") initChatEventListeners();
   if (typeof initRagEventListeners === "function") initRagEventListeners();
+  if (typeof initLlmSettingsEventListeners === "function")
+    initLlmSettingsEventListeners();
 
   // --- Session Management Event Handlers (using session_api.js) ---
   $("#btn-new-session").on("click", function () {
@@ -989,10 +767,12 @@ $(document).ready(function () {
 
         fetchAndDisplaySessions();
         if (typeof updateRagControlsState === "function")
-          updateRagControlsState();
-        fetchAndPopulateLlmProviders();
-        fetchAndDisplaySystemMessage();
-        renderPromptTemplateValuesTable();
+          updateRagControlsState(); // from rag_ui.js
+        if (typeof fetchAndPopulateLlmProviders === "function")
+          fetchAndPopulateLlmProviders(); // from llm_settings_ui.js
+        if (typeof fetchAndDisplaySystemMessage === "function")
+          fetchAndDisplaySystemMessage(); // from llm_settings_ui.js
+        renderPromptTemplateValuesTable(); // from custom.js (for now)
         updateContextUsageDisplay(null);
 
         stagedContextItems = [];
@@ -1032,8 +812,8 @@ $(document).ready(function () {
           loadedSessionData.messages.length > 0
         ) {
           loadedSessionData.messages.forEach((msg) => {
-            // Assuming appendMessageToChat is globally available from chat_ui.js
             if (typeof appendMessageToChat === "function") {
+              // from chat_ui.js
               appendMessageToChat(msg.content, msg.role, false, msg.id);
             }
           });
@@ -1062,18 +842,14 @@ $(document).ready(function () {
         fetchAndDisplaySessions();
         $("#status-provider").text(currentLlmSettings.providerName || "N/A");
         $("#status-model").text(currentLlmSettings.modelName || "N/A");
-        $("#system-message-input").val(currentLlmSettings.systemMessage);
-        if (
-          $("#llm-provider-select").val() !== currentLlmSettings.providerName
-        ) {
-          $("#llm-provider-select").val(currentLlmSettings.providerName);
-          fetchAndPopulateLlmModels(currentLlmSettings.providerName);
-        } else if (
-          $("#llm-model-select").val() !== currentLlmSettings.modelName
-        ) {
-          $("#llm-model-select").val(currentLlmSettings.modelName);
-        }
 
+        // Update LLM settings UI via functions in llm_settings_ui.js
+        if (typeof fetchAndPopulateLlmProviders === "function")
+          fetchAndPopulateLlmProviders(); // Will set dropdowns
+        if (typeof fetchAndDisplaySystemMessage === "function")
+          fetchAndDisplaySystemMessage(); // Will set textarea
+
+        // Update RAG UI via functions in rag_ui.js
         if (typeof updateRagControlsState === "function")
           updateRagControlsState();
         if (
@@ -1084,7 +860,7 @@ $(document).ready(function () {
           fetchAndPopulateRagCollections();
         }
 
-        renderPromptTemplateValuesTable();
+        renderPromptTemplateValuesTable(); // from custom.js (for now)
         updateContextUsageDisplay(null);
 
         stagedContextItems = [];
@@ -1568,33 +1344,11 @@ $(document).ready(function () {
   });
 
   // --- Settings Tab Event Handlers ---
+  // The LLM settings part of this is now handled by initLlmSettingsEventListeners in llm_settings_ui.js
   $("#settings-tab-btn").on("shown.bs.tab", function () {
-    console.log(
-      "Settings tab shown. Initializing LLM controls and prompt values.",
-    );
-    fetchAndPopulateLlmProviders(); // Also populates models if provider is set
-    fetchAndDisplaySystemMessage();
-    fetchAndDisplayPromptTemplateValues(); // Fetch and display prompt values
-  });
-
-  $("#llm-provider-select").on("change", function () {
-    const selectedProvider = $(this).val();
-    if (selectedProvider) {
-      fetchAndPopulateLlmModels(selectedProvider);
-    } else {
-      $("#llm-model-select")
-        .empty()
-        .append('<option value="">Select provider first</option>')
-        .prop("disabled", true);
-    }
-  });
-
-  $("#btn-apply-llm-settings").on("click", function () {
-    applyLlmSettings();
-  });
-
-  $("#btn-apply-system-message").on("click", function () {
-    applySystemMessage();
+    console.log("Settings tab shown. Initializing Prompt Template Values.");
+    // LLM provider/model and system message are initialized by llm_settings_ui.js
+    fetchAndDisplayPromptTemplateValues(); // This part remains or moves to prompt_template_ui.js
   });
 
   // --- Prompt Template Values Event Handlers ---
@@ -1612,7 +1366,7 @@ $(document).ready(function () {
     }
     console.log(`Adding prompt template value: ${key} = ${value}`);
     $.ajax({
-      url: "/api/settings/prompt_template_values/update", // Endpoint to add/update a single key-value
+      url: "/api/settings/prompt_template_values/update",
       type: "POST",
       contentType: "application/json",
       data: JSON.stringify({ key: key, value: value }),
@@ -1660,7 +1414,7 @@ $(document).ready(function () {
               `Deleting prompt template value for key: ${keyToDelete}`,
             );
             $.ajax({
-              url: "/api/settings/prompt_template_values/delete_key", // Endpoint to delete a specific key
+              url: "/api/settings/prompt_template_values/delete_key",
               type: "POST",
               contentType: "application/json",
               data: JSON.stringify({ key: keyToDelete }),
@@ -1705,12 +1459,11 @@ $(document).ready(function () {
         if (confirmed) {
           console.log("Clearing all prompt template values.");
           $.ajax({
-            url: "/api/settings/prompt_template_values/clear_all", // Endpoint to clear all values
+            url: "/api/settings/prompt_template_values/clear_all",
             type: "POST",
             dataType: "json",
             success: function (response) {
               if (response && response.prompt_template_values !== undefined) {
-                // Check for undefined for empty object
                 currentPromptTemplateValues = response.prompt_template_values;
                 renderPromptTemplateValuesTable();
                 showToast(
@@ -1752,16 +1505,15 @@ $(document).ready(function () {
   // --- REPL Command Input Handler ---
   $("#repl-command-input").on("keypress", function (e) {
     if (e.key === "Enter") {
-      e.preventDefault(); // Prevent default form submission if it's in a form
+      e.preventDefault();
       const commandText = $(this).val().trim();
       if (commandText) {
         console.log("REPL command to send:", commandText);
         $("#repl-command-output").prepend(
           `<div class="text-info"><i class="fas fa-angle-right"></i> ${escapeHtml(commandText)}</div>`,
         );
-        $(this).val(""); // Clear input
+        $(this).val("");
 
-        // Send command to backend
         $.ajax({
           url: "/api/command",
           type: "POST",
