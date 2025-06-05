@@ -3,8 +3,42 @@
 /**
  * @file utils.js
  * @description Utility functions for the llmchat-web interface.
- * This file contains general-purpose helper functions.
+ * This file contains general-purpose helper functions and
+ * initializes global state variables to ensure they are defined early.
  */
+
+// --- Global State Variables Initialization ---
+// Explicitly attach to the window object to ensure global availability
+// and initialize as objects/arrays immediately. These will be populated
+// by main_controller.js and used by other UI modules.
+
+/** @type {string|null} Stores the current LLMCore session ID. */
+window.currentLlmSessionId = null;
+
+/** @type {Array<Object>} Stores items staged by the user for the active context. */
+window.stagedContextItems = [];
+
+/** @type {Object} Stores current RAG settings. */
+window.currentRagSettings = {
+  enabled: false,
+  collectionName: null,
+  kValue: 3,
+  filter: null,
+};
+
+/** @type {Object} Stores current LLM settings. */
+window.currentLlmSettings = {
+  providerName: null,
+  modelName: null,
+  systemMessage: "",
+};
+
+/** @type {Object} Stores current Prompt Template Values. */
+window.currentPromptTemplateValues = {};
+
+console.log("UTILS.JS: Global state variables initialized on window object.");
+
+// --- Utility Functions ---
 
 /**
  * Escapes HTML special characters in a string.
@@ -59,7 +93,6 @@ function showToast(
             </div>
         </div>
     `;
-  // Ensure the toast container exists
   if ($("#toast-container").length === 0) {
     $("body").append(
       '<div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1056"></div>',
@@ -70,7 +103,7 @@ function showToast(
   toastElement.show();
 
   const toastDomElement = document.getElementById(toastId);
-  let confirmationHandled = false; // Flag to ensure callback is only called once
+  let confirmationHandled = false;
 
   if (needsConfirmation && callback) {
     $(toastDomElement)
@@ -88,15 +121,12 @@ function showToast(
         if (!confirmationHandled) {
           confirmationHandled = true;
           callback(false);
-          // Toast will hide due to data-bs-dismiss
         }
       });
   }
 
   toastDomElement.addEventListener("hidden.bs.toast", function () {
     if (needsConfirmation && callback && !confirmationHandled) {
-      // If toast was dismissed by other means (e.g., close button) and confirmation was expected
-      // Treat as 'No' or 'Cancel'
       callback(false);
     }
     this.remove();
@@ -144,7 +174,6 @@ function updateContextUsageDisplay(contextUsage) {
       .removeClass("bg-success bg-warning bg-danger")
       .addClass("bg-info");
   }
-  // console.log("UTILS: Context usage display updated."); // Optional: for debugging
 }
 
 /**
@@ -152,9 +181,6 @@ function updateContextUsageDisplay(contextUsage) {
  */
 function updateChatInputTokenEstimate() {
   const text = $("#chat-input").val();
-  // A very rough estimate: 1 token ~ 4 chars in English.
-  // This can be significantly off for code or other languages.
   const estimatedTokens = Math.ceil(text.length / 4);
   $("#chat-input-token-estimate").text(`Tokens: ~${estimatedTokens}`);
-  // console.log("UTILS: Chat input token estimate updated."); // Optional: for debugging
 }

@@ -8,6 +8,9 @@
  * updateContextUsageDisplay, fetchAndDisplayWorkspaceItems).
  */
 
+// Global variable to hold the jQuery object of the current raw output block
+let currentRawOutputBlock = null;
+
 /**
  * Appends a message to the chat UI.
  * @param {string} text - The message content.
@@ -52,54 +55,39 @@ function appendMessageToChat(
 
 /**
  * Appends content to the Raw LLM Output display.
- * Prepends new responses with a timestamp and separator.
+ * Each new response or error creates a new prepended block. Streamed chunks append to the current block.
  * @param {string} content - The raw content to append.
- * @param {boolean} isNewResponseSegment - True if this is the start of a new LLM response, false if it's a continuing chunk.
+ * @param {boolean} isNewResponseBlock - True if this is the start of a new LLM response block, false if it's a continuing chunk.
  */
-function appendRawOutput(content, isNewResponseSegment) {
+function appendRawOutput(content, isNewResponseBlock) {
   const $rawOutputDisplay = $("#raw-llm-output-display");
-  let currentRawContent = $rawOutputDisplay.text();
 
-  if (isNewResponseSegment) {
+  if (isNewResponseBlock) {
     const timestamp = new Date().toLocaleTimeString();
-    const separator = `\n\n--- Raw Output at ${timestamp} ---\n`;
-    // Prepend new response to existing content
-    $rawOutputDisplay.text(separator + content + currentRawContent);
+    const separator = `--- Raw Output at ${timestamp} ---\n`;
+    // Create a new <pre> element for this block
+    const $newBlock = $("<pre>").text(separator + content);
+    $rawOutputDisplay.prepend($newBlock);
+    currentRawOutputBlock = $newBlock; // Set as the current block for subsequent appends
   } else {
-    // For streaming chunks, we need to append to the *current* response block.
-    // This means finding the last separator and appending after it, or to the start if no separator yet.
-    const lastSeparatorIndex = currentRawContent.indexOf("--- Raw Output at");
-    if (isNewResponseSegment && lastSeparatorIndex !== -1) {
-      // Should be caught by isNewResponseSegment logic above
-      // This case should not happen if isNewResponseSegment logic is correct.
-      // Defensive: prepend if somehow isNewResponseSegment is true but we're in a stream.
-      $rawOutputDisplay.text(content + currentRawContent);
-    } else if (lastSeparatorIndex !== -1) {
-      // Append to the latest block
-      const beforeLastBlock = currentRawContent.substring(
-        0,
-        lastSeparatorIndex,
-      );
-      let lastBlockContent = currentRawContent.substring(lastSeparatorIndex);
-      // Find the end of the "--- Raw Output at TIMESTAMP ---" line to append after it
-      const endOfSeparatorLine = lastBlockContent.indexOf("\n") + 1;
-      lastBlockContent =
-        lastBlockContent.substring(0, endOfSeparatorLine) +
-        content +
-        lastBlockContent.substring(endOfSeparatorLine);
-      $rawOutputDisplay.text(beforeLastBlock + lastBlockContent);
+    if (currentRawOutputBlock) {
+      // Append content to the existing current block
+      currentRawOutputBlock.text(currentRawOutputBlock.text() + content);
     } else {
-      // No separator yet, just prepend (or append if it's the very first chunk of the very first message)
-      // To ensure chunks append correctly for the *first* message before a separator is added:
-      if ($rawOutputDisplay.data("is-streaming-first-response")) {
-        $rawOutputDisplay.text(currentRawContent + content);
-      } else {
-        // This case is for the very first chunk of a new response if the display was empty.
-        // It will be caught by isNewResponseSegment=true on the next call.
-        // For now, just set it.
-        $rawOutputDisplay.text(content + currentRawContent); // Prepend if no stream state
-      }
+      // Fallback: If no current block, prepend as a new block (though this shouldn't happen if logic is correct)
+      console.warn(
+        "appendRawOutput: No currentRawOutputBlock, creating new block for chunk.",
+      );
+      const timestamp = new Date().toLocaleTimeString();
+      const fallbackSeparator = `--- Raw Output Chunk (no current block) at ${timestamp} ---\n`;
+      const $newBlock = $("<pre>").text(fallbackSeparator + content);
+      $rawOutputDisplay.prepend($newBlock);
+      currentRawOutputBlock = $newBlock; // Set this as current
     }
+  }
+  // Ensure the main raw output display scrolls to the top to show the latest prepended block
+  if ($rawOutputDisplay[0]) {
+    $rawOutputDisplay.scrollTop(0);
   }
 }
 
@@ -112,7 +100,8 @@ function appendRawOutput(content, isNewResponseSegment) {
 async function sendMessage() {
   const messageText = $("#chat-input").val().trim();
   if (!messageText) return;
-  if (!currentLlmSessionId) {
+  if (!window.currentLlmSessionId) {
+    // Use window. to be explicit about global
     showToast(
       "Error",
       "No active session. Please start or load a session.",
@@ -121,19 +110,16 @@ async function sendMessage() {
     return;
   }
 
-  // Indicate start of a new response for raw output
-  // For the very first response, we might not have a separator yet.
-  if ($("#raw-llm-output-display").text().length === 0) {
-    $("#raw-llm-output-display").data("is-streaming-first-response", true);
-  } else {
-    $("#raw-llm-output-display").data("is-streaming-first-response", false);
-  }
-  // The first actual chunk/response will call appendRawOutput with isNewResponseSegment = true
+  // Flag to indicate the first chunk of a new response for raw output logic
   let rawOutputIsNewResponseSegment = true;
+  currentRawOutputBlock = null; // Reset current raw output block for new message
 
   appendMessageToChat(messageText, "user");
   $("#chat-input").val("");
-  updateChatInputTokenEstimate();
+  if (typeof updateChatInputTokenEstimate === "function") {
+    // Check if function exists
+    updateChatInputTokenEstimate();
+  }
 
   const agentMessageElementId = `agent-msg-${Date.now()}`;
   appendMessageToChat(
@@ -150,9 +136,9 @@ async function sendMessage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message: messageText,
-        session_id: currentLlmSessionId,
+        session_id: window.currentLlmSessionId, // Use window.
         stream: true,
-        active_context_specification: stagedContextItems,
+        active_context_specification: window.stagedContextItems, // Use window.
       }),
     });
 
@@ -165,9 +151,10 @@ async function sendMessage() {
       $(`#${agentMessageElementId}`).html(
         `<span class="text-danger">Error: ${escapeHtml(errorMessage)}</span>`,
       );
-      appendRawOutput(`Error: ${errorMessage}`, rawOutputIsNewResponseSegment);
-      rawOutputIsNewResponseSegment = false; // Subsequent raw output for this error is part of the same "response"
-      updateContextUsageDisplay(null);
+      appendRawOutput(`Error: ${errorMessage}`, rawOutputIsNewResponseSegment); // True for new error block
+      rawOutputIsNewResponseSegment = false; // Any further raw output for this error is part of the same "response"
+      if (typeof updateContextUsageDisplay === "function")
+        updateContextUsageDisplay(null); // Check if function exists
       return;
     }
 
@@ -205,10 +192,6 @@ async function sendMessage() {
               // Append raw content to raw output display
               appendRawOutput(eventData.content, rawOutputIsNewResponseSegment);
               rawOutputIsNewResponseSegment = false; // Subsequent chunks are part of the same response
-              $("#raw-llm-output-display").data(
-                "is-streaming-first-response",
-                false,
-              ); // No longer the first overall response
             } else if (
               eventData.type === "full_response_id" &&
               eventData.message_id
@@ -225,7 +208,8 @@ async function sendMessage() {
                 $(`#${agentMessageElementId}`).append(actionsHtml);
               }
             } else if (eventData.type === "context_usage" && eventData.data) {
-              updateContextUsageDisplay(eventData.data);
+              if (typeof updateContextUsageDisplay === "function")
+                updateContextUsageDisplay(eventData.data); // Check if function exists
             } else if (eventData.type === "end") {
               console.log("Stream ended by server.");
               if (
@@ -243,10 +227,7 @@ async function sendMessage() {
               ) {
                 $(`#${agentMessageElementId}`).append(actionsHtml);
               }
-              $("#raw-llm-output-display").data(
-                "is-streaming-first-response",
-                false,
-              );
+              currentRawOutputBlock = null; // Clear current block on stream end
               return;
             } else if (eventData.type === "error") {
               console.error("SSE Error Event:", eventData.error);
@@ -256,17 +237,20 @@ async function sendMessage() {
               );
               appendRawOutput(
                 `Stream Error: ${sseErrorMessage}`,
-                rawOutputIsNewResponseSegment,
+                rawOutputIsNewResponseSegment, // True for new error block
               );
               rawOutputIsNewResponseSegment = false;
-              $("#raw-llm-output-display").data(
-                "is-streaming-first-response",
-                false,
-              );
+              currentRawOutputBlock = null; // Clear current block on error
               return;
             }
           } catch (e) {
             console.warn("Error parsing SSE event data:", e, "Line:", line);
+            // If parsing fails, log the raw line to raw output as a new block
+            appendRawOutput(
+              `Failed to parse SSE line: ${line}`,
+              rawOutputIsNewResponseSegment,
+            );
+            rawOutputIsNewResponseSegment = false; // subsequent lines of this error are part of same block
           }
         }
       }
@@ -285,7 +269,7 @@ async function sendMessage() {
     ) {
       $(`#${agentMessageElementId}`).append(actionsHtml);
     }
-    $("#raw-llm-output-display").data("is-streaming-first-response", false);
+    currentRawOutputBlock = null; // Clear current block as message is complete
   } catch (error) {
     console.error("Error sending message:", error);
     const catchErrorMessage =
@@ -295,11 +279,11 @@ async function sendMessage() {
     );
     appendRawOutput(
       `Error: ${catchErrorMessage}`,
-      rawOutputIsNewResponseSegment,
+      rawOutputIsNewResponseSegment, // True for new error block
     );
-    // rawOutputIsNewResponseSegment = false; // Not strictly needed here as we return
-    updateContextUsageDisplay(null);
-    $("#raw-llm-output-display").data("is-streaming-first-response", false);
+    if (typeof updateContextUsageDisplay === "function")
+      updateContextUsageDisplay(null); // Check if function exists
+    currentRawOutputBlock = null; // Clear current block on error
   }
 }
 
@@ -341,7 +325,8 @@ function initChatEventListeners() {
 
   $("#chat-messages").on("click", ".btn-add-workspace", function () {
     const messageId = $(this).closest(".message-bubble").data("message-id");
-    if (!messageId || !currentLlmSessionId) {
+    if (!messageId || !window.currentLlmSessionId) {
+      // Use window.
       showToast(
         "Error",
         "Cannot add to workspace: Message ID or Session ID is missing.",
@@ -350,10 +335,10 @@ function initChatEventListeners() {
       return;
     }
     console.log(
-      `Adding message ${messageId} to workspace for session ${currentLlmSessionId}`,
+      `Adding message ${messageId} to workspace for session ${window.currentLlmSessionId}`, // Use window.
     );
     $.ajax({
-      url: `/api/sessions/${currentLlmSessionId}/workspace/add_from_message`,
+      url: `/api/sessions/${window.currentLlmSessionId}/workspace/add_from_message`, // Use window.
       type: "POST",
       contentType: "application/json",
       data: JSON.stringify({ message_id: messageId }),
@@ -389,7 +374,8 @@ function initChatEventListeners() {
   $("#chat-messages").on("click", ".btn-delete-message", function () {
     const $messageBubble = $(this).closest(".message-bubble");
     const messageId = $messageBubble.data("message-id");
-    if (!messageId || !currentLlmSessionId) {
+    if (!messageId || !window.currentLlmSessionId) {
+      // Use window.
       showToast(
         "Error",
         "Cannot delete message: Message ID or Session ID is missing.",
@@ -405,10 +391,10 @@ function initChatEventListeners() {
       function (confirmed) {
         if (confirmed) {
           console.log(
-            `Deleting message ${messageId} from session ${currentLlmSessionId}`,
+            `Deleting message ${messageId} from session ${window.currentLlmSessionId}`, // Use window.
           );
           $.ajax({
-            url: `/api/sessions/${currentLlmSessionId}/messages/${messageId}`,
+            url: `/api/sessions/${window.currentLlmSessionId}/messages/${messageId}`, // Use window.
             type: "DELETE",
             dataType: "json",
             success: function (response) {

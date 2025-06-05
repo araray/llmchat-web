@@ -259,6 +259,30 @@ block head_extra %}
         color: #6c757d;
     }
 
+    /* Raw Output Display Specifics */
+    #raw-llm-output-display {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        max-height: 100%; /* Ensure it can fill its container */
+        overflow-y: auto; /* Add scrollbar if content exceeds height */
+        background-color: #222; /* Slightly different background for raw output */
+        color: #ccc;
+        font-family: "Courier New", Courier, monospace;
+        font-size: 0.8rem;
+        padding: 10px;
+        border-radius: 4px;
+    }
+    #raw-llm-output-display pre { /* Style for individual blocks within raw display */
+        margin-bottom: 0.5rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px dashed #444;
+    }
+    #raw-llm-output-display pre:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+    }
+
+
     /* Ingestion Modal Styling */
     #ingestionModal .nav-tabs .nav-link {
         background-color: #495057; /* Darker inactive tab for modal */
@@ -687,24 +711,20 @@ block head_extra %}
                 </div>
             </div>
             <div
-                class="tab-pane fade tab-pane-full-height"
+                class="tab-pane fade tab-pane-full-height p-0" <!-- Remove padding from tab-pane itself -->
                 id="raw-output-tab-pane"
                 role="tabpanel"
                 aria-labelledby="raw-output-tab-btn"
                 tabindex="0"
             >
-                <h5>Last Raw LLM Output</h5>
-                <pre
+                <!-- The <pre> itself will have padding and manage scroll -->
+                <div
                     id="raw-llm-output-display"
-                    style="
-                        white-space: pre-wrap;
-                        word-wrap: break-word;
-                        max-height: 100%;
-                        overflow-y: auto;
-                    "
+                    class="h-100"
                 >
-Raw output will appear here...</pre
-                >
+                    <!-- Content dynamically added by JS as <pre> blocks -->
+                    <pre class="text-muted p-2">Raw LLM output will appear here, newest first...</pre>
+                </div>
             </div>
         </div>
     </main>
@@ -942,7 +962,10 @@ Raw output will appear here...</pre
                 id="app-logs-display"
                 style="max-height: 150px; overflow-y: auto; font-size: 0.8rem"
             >
-Application logs will appear here...</pre
+Backend application log viewing is not yet implemented in this interface.
+For debugging, please check the server console output or configured log files.
+LLMCore logs to console/file based on its own settings.
+Gunicorn (if used) logs access/errors to its configured files.</pre
             >
         </div>
         <div

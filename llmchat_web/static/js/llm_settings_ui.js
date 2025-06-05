@@ -4,18 +4,18 @@
  * @file llm_settings_ui.js
  * @description Handles UI logic for LLM provider/model selection and system messages.
  * Depends on utils.js for helper functions (escapeHtml, showToast) and
- * accesses/modifies global variables from custom.js (currentLlmSettings).
+ * accesses/modifies global variables from custom.js (window.currentLlmSettings).
  */
 
 /**
  * Fetches available LLM providers and populates the provider dropdown.
- * Calls fetchAndPopulateLlmModels if a provider is already selected in currentLlmSettings.
- * Relies on global `currentLlmSettings` and `escapeHtml`.
+ * Calls fetchAndPopulateLlmModels if a provider is already selected in window.currentLlmSettings.
+ * Relies on global `window.currentLlmSettings` and `escapeHtml`.
  */
 function fetchAndPopulateLlmProviders() {
   console.log("LLM_UI: Fetching LLM providers...");
   $.ajax({
-    url: "/api/settings/llm/providers", // CORRECTED PATH
+    url: "/api/settings/llm/providers",
     type: "GET",
     dataType: "json",
     success: function (providers) {
@@ -41,16 +41,24 @@ function fetchAndPopulateLlmProviders() {
             }),
           );
         });
-        if (currentLlmSettings.providerName) {
-          // currentLlmSettings from custom.js
-          $select.val(currentLlmSettings.providerName);
-          fetchAndPopulateLlmModels(currentLlmSettings.providerName); // Trigger model population
+        // Ensure window.currentLlmSettings is defined before accessing properties
+        if (
+          window.currentLlmSettings &&
+          window.currentLlmSettings.providerName
+        ) {
+          $select.val(window.currentLlmSettings.providerName);
+          fetchAndPopulateLlmModels(window.currentLlmSettings.providerName); // Trigger model population
         } else {
           // If no provider is pre-selected, ensure model dropdown is in a sensible default state
           $("#llm-model-select")
             .empty()
             .append('<option selected value="">Select provider first</option>')
             .prop("disabled", true);
+          if (!window.currentLlmSettings) {
+            console.warn(
+              "LLM_UI: window.currentLlmSettings was undefined during provider population.",
+            );
+          }
         }
       } else {
         $select.append('<option value="" disabled>No providers found</option>');
@@ -75,7 +83,6 @@ function fetchAndPopulateLlmProviders() {
         .empty()
         .append('<option value="">Select provider first</option>')
         .prop("disabled", true);
-      // Display error to user if appropriate
       showToast(
         "Error",
         "Could not load LLM providers. Check server logs.",
@@ -87,7 +94,7 @@ function fetchAndPopulateLlmProviders() {
 
 /**
  * Fetches available models for the selected LLM provider and populates the model dropdown.
- * Relies on global `currentLlmSettings` and `escapeHtml`.
+ * Relies on global `window.currentLlmSettings` and `escapeHtml`.
  * @param {string} providerName - The name of the selected LLM provider.
  */
 function fetchAndPopulateLlmModels(providerName) {
@@ -107,7 +114,7 @@ function fetchAndPopulateLlmModels(providerName) {
   }
 
   $.ajax({
-    url: `/api/settings/llm/providers/${providerName}/models`, // CORRECTED PATH
+    url: `/api/settings/llm/providers/${providerName}/models`,
     type: "GET",
     dataType: "json",
     success: function (models) {
@@ -127,10 +134,15 @@ function fetchAndPopulateLlmModels(providerName) {
         });
         // Set model if current settings match the provider and a model is selected
         if (
-          currentLlmSettings.providerName === providerName && // currentLlmSettings from custom.js
-          currentLlmSettings.modelName
+          window.currentLlmSettings && // Check defined
+          window.currentLlmSettings.providerName === providerName &&
+          window.currentLlmSettings.modelName
         ) {
-          $modelSelect.val(currentLlmSettings.modelName);
+          $modelSelect.val(window.currentLlmSettings.modelName);
+        } else if (!window.currentLlmSettings) {
+          console.warn(
+            "LLM_UI: window.currentLlmSettings was undefined during model population.",
+          );
         }
       } else {
         $modelSelect.append(
@@ -161,7 +173,7 @@ function fetchAndPopulateLlmModels(providerName) {
 
 /**
  * Sends selected LLM provider and model to the backend.
- * Updates global `currentLlmSettings` and UI status display.
+ * Updates global `window.currentLlmSettings` and UI status display.
  * Uses global `showToast`.
  */
 function applyLlmSettings() {
@@ -177,7 +189,7 @@ function applyLlmSettings() {
   );
 
   $.ajax({
-    url: "/api/settings/llm/update", // This path was already correct
+    url: "/api/settings/llm/update",
     type: "POST",
     contentType: "application/json",
     data: JSON.stringify({
@@ -191,16 +203,34 @@ function applyLlmSettings() {
         response,
       );
       if (response && response.llm_settings) {
-        // Update global currentLlmSettings from custom.js
+        // Defensive check and re-initialization for window.currentLlmSettings
+        if (
+          typeof window.currentLlmSettings === "undefined" ||
+          window.currentLlmSettings === null
+        ) {
+          console.warn(
+            "LLM_UI: window.currentLlmSettings was undefined/null in applyLlmSettings AJAX success. Re-initializing.",
+          );
+          window.currentLlmSettings = {
+            providerName: null,
+            modelName: null,
+            systemMessage: "",
+          };
+        }
+
         window.currentLlmSettings.providerName =
           response.llm_settings.provider_name;
         window.currentLlmSettings.modelName = response.llm_settings.model_name;
+        window.currentLlmSettings.systemMessage =
+          response.llm_settings.system_message !== undefined
+            ? response.llm_settings.system_message
+            : window.currentLlmSettings.systemMessage || ""; // Preserve if not in response
 
         $("#status-provider").text(
           window.currentLlmSettings.providerName || "N/A",
         );
         $("#status-model").text(window.currentLlmSettings.modelName || "N/A");
-        showToast("Success", "LLM settings applied successfully!", "success"); // showToast from utils.js
+        showToast("Success", "LLM settings applied successfully!", "success");
       }
     },
     error: function (jqXHR, textStatus, errorThrown) {
@@ -210,37 +240,56 @@ function applyLlmSettings() {
         errorThrown,
         jqXHR.responseText,
       );
-      showToast("Error", "Failed to apply LLM settings.", "danger"); // showToast from utils.js
+      showToast("Error", "Failed to apply LLM settings.", "danger");
     },
   });
 }
 
 /**
  * Fetches and displays the current system message for the session.
- * Relies on global `currentLlmSettings`.
+ * Relies on global `window.currentLlmSettings`.
  */
 function fetchAndDisplaySystemMessage() {
   console.log("LLM_UI: Fetching current system message...");
-  // Use the globally synced currentLlmSettings.systemMessage from custom.js
+  // Use the globally synced window.currentLlmSettings.systemMessage from custom.js
   // This is typically populated by fetchAndUpdateInitialStatus
   if (
-    currentLlmSettings.systemMessage !== null &&
-    currentLlmSettings.systemMessage !== undefined
+    window.currentLlmSettings && // Check defined
+    window.currentLlmSettings.systemMessage !== null &&
+    window.currentLlmSettings.systemMessage !== undefined
   ) {
-    $("#system-message-input").val(currentLlmSettings.systemMessage);
+    $("#system-message-input").val(window.currentLlmSettings.systemMessage);
   } else {
-    // Fallback AJAX call if global state is not set (should ideally be set by fetchAndUpdateInitialStatus)
-    // This indicates an issue if fetchAndUpdateInitialStatus didn't populate it.
-    console.warn(
-      "LLM_UI: currentLlmSettings.systemMessage is not set, attempting fallback fetch. This might indicate an earlier init problem.",
-    );
+    if (!window.currentLlmSettings) {
+      console.warn(
+        "LLM_UI: window.currentLlmSettings was undefined during system message fetch. Attempting fallback AJAX call.",
+      );
+    } else {
+      console.warn(
+        "LLM_UI: window.currentLlmSettings.systemMessage is not set, attempting fallback fetch. This might indicate an earlier init problem.",
+      );
+    }
     $.ajax({
-      url: "/api/settings/system_message", // This path was already correct
+      url: "/api/settings/system_message",
       type: "GET",
       dataType: "json",
       success: function (response) {
         console.log("LLM_UI: System message received (fallback):", response);
         if (response && response.system_message !== undefined) {
+          // Ensure window.currentLlmSettings exists before assigning
+          if (
+            typeof window.currentLlmSettings === "undefined" ||
+            window.currentLlmSettings === null
+          ) {
+            console.warn(
+              "LLM_UI: window.currentLlmSettings was undefined in system message fallback. Re-initializing.",
+            );
+            window.currentLlmSettings = {
+              providerName: null,
+              modelName: null,
+              systemMessage: "",
+            };
+          }
           window.currentLlmSettings.systemMessage = response.system_message; // Update global
           $("#system-message-input").val(response.system_message);
         }
@@ -259,7 +308,7 @@ function fetchAndDisplaySystemMessage() {
 
 /**
  * Sends the updated system message to the backend.
- * Updates global `currentLlmSettings`.
+ * Updates global `window.currentLlmSettings`.
  * Uses global `showToast`.
  */
 function applySystemMessage() {
@@ -267,7 +316,7 @@ function applySystemMessage() {
   console.log("LLM_UI: Applying system message:", systemMessage);
 
   $.ajax({
-    url: "/api/settings/system_message/update", // This path was already correct
+    url: "/api/settings/system_message/update",
     type: "POST",
     contentType: "application/json",
     data: JSON.stringify({ system_message: systemMessage }),
@@ -275,8 +324,22 @@ function applySystemMessage() {
     success: function (response) {
       console.log("LLM_UI: System message updated successfully:", response);
       if (response && response.system_message !== undefined) {
-        window.currentLlmSettings.systemMessage = response.system_message; // Update global currentLlmSettings
-        showToast("Success", "System message applied successfully!", "success"); // showToast from utils.js
+        // Ensure window.currentLlmSettings exists before assigning
+        if (
+          typeof window.currentLlmSettings === "undefined" ||
+          window.currentLlmSettings === null
+        ) {
+          console.warn(
+            "LLM_UI: window.currentLlmSettings was undefined in applySystemMessage. Re-initializing.",
+          );
+          window.currentLlmSettings = {
+            providerName: null,
+            modelName: null,
+            systemMessage: "",
+          };
+        }
+        window.currentLlmSettings.systemMessage = response.system_message;
+        showToast("Success", "System message applied successfully!", "success");
       }
     },
     error: function (jqXHR, textStatus, errorThrown) {
@@ -286,7 +349,7 @@ function applySystemMessage() {
         errorThrown,
         jqXHR.responseText,
       );
-      showToast("Error", "Failed to apply system message.", "danger"); // showToast from utils.js
+      showToast("Error", "Failed to apply system message.", "danger");
     },
   });
 }
@@ -323,10 +386,8 @@ function initLlmSettingsEventListeners() {
     console.log(
       "LLM_UI: Settings tab shown, initializing LLM provider/model and system message.",
     );
-    // These functions are now more robust due to corrected API paths
     fetchAndPopulateLlmProviders();
     fetchAndDisplaySystemMessage();
-    // The call to fetchAndDisplayPromptTemplateValues() is handled by prompt_template_ui.js
   });
   console.log("LLM Settings UI event listeners initialized.");
 }
