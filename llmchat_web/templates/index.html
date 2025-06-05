@@ -830,12 +830,24 @@ block head_extra %}
             aria-labelledby="files-tab-btn"
             tabindex="0"
         >
-            <p class="small text-muted">File management UI will go here.</p>
+            <!-- Updated placeholder for Files tab -->
+            <p class="small text-muted">
+                For file operations, please use:
+                <ul>
+                    <li><strong>Context Manager Tab:</strong> To add local server files or text snippets to the current session's workspace.</li>
+                    <li><strong>RAG Tab &gt; Ingest Data:</strong> To upload files/directories or ingest Git repositories into RAG collections.</li>
+                </ul>
+                 This tab is a placeholder for potential future dedicated file management features.
+            </p>
+            <!-- Original button kept for now, though its functionality might be redundant
+                 or could be repurposed if specific "Files Tab" features are added.
+                 For now, it's unhandled.
+            -->
             <button
                 class="btn btn-sm btn-outline-primary"
                 id="btn-add-file-to-workspace-bottom"
             >
-                <i class="fas fa-file-upload"></i> Add File to Workspace
+                <i class="fas fa-file-upload"></i> Add File to Workspace (via Context Manager)
             </button>
         </div>
         <div
