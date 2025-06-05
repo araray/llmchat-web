@@ -16,7 +16,7 @@
 function fetchAndPopulateRagCollections() {
   console.log("RAG_UI: Fetching RAG collections...");
   $.ajax({
-    url: "/api/rag/collections",
+    url: "/api/rag/collections", // Correct endpoint
     type: "GET",
     dataType: "json",
     success: function (collections) {
@@ -26,20 +26,32 @@ function fetchAndPopulateRagCollections() {
         .append('<option selected value="">Select Collection...</option>');
       if (collections && collections.length > 0) {
         collections.forEach(function (collection) {
+          // Assuming collection can be a string or an object with name/id
           const collectionName =
-            typeof collection === "string" ? collection : collection.name;
-          const collectionId =
-            typeof collection === "string" ? collection : collection.id;
+            typeof collection === "string"
+              ? collection
+              : collection.name || collection.id; // Prefer name, fallback to id
+          const collectionValue =
+            typeof collection === "string"
+              ? collection
+              : collection.id || collection.name; // Prefer id if available, else name
           $select.append(
             $("<option>", {
-              value: collectionId,
+              value: collectionValue,
               text: escapeHtml(collectionName), // escapeHtml from utils.js
             }),
           );
         });
-        if (currentRagSettings.collectionName) {
-          // currentRagSettings from custom.js
-          $select.val(currentRagSettings.collectionName);
+        // Ensure currentRagSettings and its properties are checked before use
+        if (
+          window.currentRagSettings &&
+          window.currentRagSettings.collectionName
+        ) {
+          $select.val(window.currentRagSettings.collectionName);
+        } else if (!window.currentRagSettings) {
+          console.warn(
+            "RAG_UI: window.currentRagSettings is undefined during collection population.",
+          );
         }
       } else {
         $select.append(
@@ -52,6 +64,7 @@ function fetchAndPopulateRagCollections() {
         "RAG_UI: Error fetching RAG collections:",
         textStatus,
         errorThrown,
+        jqXHR.responseText,
       );
       $("#rag-collection-select")
         .empty()
@@ -65,28 +78,33 @@ function fetchAndPopulateRagCollections() {
  * Uses global `escapeHtml`.
  */
 function updateRagControlsState() {
-  $("#rag-toggle-switch").prop("checked", currentRagSettings.enabled); // currentRagSettings from custom.js
-  const controlsShouldBeDisabled = !currentRagSettings.enabled;
+  // Ensure currentRagSettings exists before accessing its properties
+  const ragSettings = window.currentRagSettings || {};
+  const isEnabled = ragSettings.enabled || false;
+  const collectionName = ragSettings.collectionName || null;
+  const kValue = ragSettings.kValue || 3;
+  const filter = ragSettings.filter || null;
+
+  $("#rag-toggle-switch").prop("checked", isEnabled);
+  const controlsShouldBeDisabled = !isEnabled;
+
   $("#rag-collection-select").prop("disabled", controlsShouldBeDisabled);
-  $("#rag-k-value")
-    .prop("disabled", controlsShouldBeDisabled)
-    .val(currentRagSettings.kValue || 3);
+  if (collectionName) {
+    // Only set value if a collection name is actually stored
+    $("#rag-collection-select").val(collectionName);
+  }
+
+  $("#rag-k-value").prop("disabled", controlsShouldBeDisabled).val(kValue);
   $("#rag-filter-input")
     .prop("disabled", controlsShouldBeDisabled)
     .val(
-      currentRagSettings.filter &&
-        Object.keys(currentRagSettings.filter).length > 0
-        ? JSON.stringify(currentRagSettings.filter)
-        : "",
+      filter && Object.keys(filter).length > 0 ? JSON.stringify(filter) : "",
     );
 
   const $ragStatusEl = $("#status-rag");
-  if (currentRagSettings.enabled) {
-    let statusText = `ON (${escapeHtml(currentRagSettings.collectionName) || "Default"}, K:${currentRagSettings.kValue || "Def"})`; // escapeHtml from utils.js
-    if (
-      currentRagSettings.filter &&
-      Object.keys(currentRagSettings.filter).length > 0
-    ) {
+  if (isEnabled) {
+    let statusText = `ON (${escapeHtml(collectionName) || "Default"}, K:${kValue || "Def"})`;
+    if (filter && Object.keys(filter).length > 0) {
       statusText += " Filter*";
     }
     $ragStatusEl
@@ -96,7 +114,7 @@ function updateRagControlsState() {
   } else {
     $ragStatusEl.text("OFF").removeClass("bg-success").addClass("bg-danger");
   }
-  console.log("RAG_UI: RAG controls state updated.");
+  console.log("RAG_UI: RAG controls state updated based on:", ragSettings);
 }
 
 /**
@@ -104,24 +122,25 @@ function updateRagControlsState() {
  * Uses global `showToast`.
  */
 function sendRagSettingsUpdate() {
-  console.log(
-    "RAG_UI: Sending RAG settings update to backend:",
-    currentRagSettings,
-  ); // currentRagSettings from custom.js
-  let filterToSend = currentRagSettings.filter;
+  // Ensure currentRagSettings exists before use
+  const ragSettings = window.currentRagSettings || {};
+  console.log("RAG_UI: Sending RAG settings update to backend:", ragSettings);
+
+  let filterToSend = ragSettings.filter;
+  // If filter is an empty string from input, treat as null. If it's already null/obj, pass as is.
   if (typeof filterToSend === "string" && filterToSend.trim() === "") {
     filterToSend = null;
   }
 
   const payload = {
-    enabled: currentRagSettings.enabled,
-    collectionName: currentRagSettings.collectionName,
-    kValue: currentRagSettings.kValue,
-    filter: filterToSend,
+    enabled: ragSettings.enabled || false,
+    collectionName: ragSettings.collectionName || null,
+    kValue: ragSettings.kValue || 3,
+    filter: filterToSend, // This will be null or an object
   };
 
   $.ajax({
-    url: "/api/settings/rag/update", // Note: This URL is under /api/settings, might be better under /api/rag
+    url: "/api/rag/settings/update", // Corrected URL
     type: "POST",
     contentType: "application/json",
     data: JSON.stringify(payload),
@@ -132,24 +151,33 @@ function sendRagSettingsUpdate() {
         response,
       );
       if (response && response.rag_settings) {
-        // Update the global currentRagSettings in custom.js
-        // This requires currentRagSettings to be mutable from here or use a setter.
-        // For now, assuming direct modification of the global object.
-        window.currentRagSettings = response.rag_settings; // Explicitly use window to clarify global modification
-        // Ensure filter is stored as an object or null locally
-        if (typeof window.currentRagSettings.filter === "string") {
-          try {
-            window.currentRagSettings.filter = JSON.parse(
-              window.currentRagSettings.filter,
-            );
-          } catch (e) {
-            console.warn(
-              "RAG_UI: Could not parse filter string from backend, setting to null",
-              e,
-            );
-            window.currentRagSettings.filter = null;
-          }
+        // Ensure window.currentRagSettings is initialized if it was undefined
+        if (
+          typeof window.currentRagSettings === "undefined" ||
+          window.currentRagSettings === null
+        ) {
+          console.warn(
+            "RAG_UI: window.currentRagSettings was undefined/null in AJAX success. Re-initializing.",
+          );
+          window.currentRagSettings = {
+            enabled: false,
+            collectionName: null,
+            kValue: 3,
+            filter: null,
+          };
         }
+        // Update the global currentRagSettings
+        window.currentRagSettings.enabled = response.rag_settings.enabled;
+        window.currentRagSettings.collectionName =
+          response.rag_settings.collection_name;
+        window.currentRagSettings.kValue = response.rag_settings.k_value;
+        // Backend now sends filter as object or null.
+        window.currentRagSettings.filter = response.rag_settings.filter;
+
+        console.log(
+          "RAG_UI: Global currentRagSettings updated:",
+          window.currentRagSettings,
+        );
       }
       updateRagControlsState(); // Re-render controls based on (potentially updated) global state
     },
@@ -158,11 +186,11 @@ function sendRagSettingsUpdate() {
         "RAG_UI: Error updating RAG settings on backend:",
         textStatus,
         errorThrown,
+        jqXHR.responseText,
       );
       showToast(
-        // showToast from utils.js
         "Error",
-        "Failed to update RAG settings on the server.",
+        `Failed to update RAG settings: ${jqXHR.responseJSON ? jqXHR.responseJSON.error : errorThrown}`,
         "danger",
       );
     },
@@ -190,10 +218,10 @@ function renderDirectRagSearchResults(results) {
         ? `<strong>Score:</strong> ${doc.score.toFixed(4)}`
         : "Score: N/A";
     const metadataDisplay = doc.metadata
-      ? `<small class="text-muted d-block">Metadata: ${escapeHtml(JSON.stringify(doc.metadata).substring(0, 100))}...</small>` // escapeHtml from utils.js
+      ? `<small class="text-muted d-block">Metadata: ${escapeHtml(JSON.stringify(doc.metadata).substring(0, 100))}...</small>`
       : "";
     const contentPreview = doc.content
-      ? `<pre>${escapeHtml(doc.content.substring(0, 250))}${doc.content.length > 250 ? "..." : ""}</pre>` // escapeHtml from utils.js
+      ? `<pre>${escapeHtml(doc.content.substring(0, 250))}${doc.content.length > 250 ? "..." : ""}</pre>`
       : '<p class="text-muted small">No content preview.</p>';
 
     const $listItem = $(`
@@ -220,19 +248,24 @@ function handleDirectRagSearch() {
   const query = $("#direct-rag-search-query").val().trim();
   if (!query) {
     showToast(
-      // showToast from utils.js
       "Error",
       "Please enter a search query for Direct RAG Search.",
       "danger",
     );
     return;
   }
-  // Use global currentRagSettings from custom.js
+  // Use global currentRagSettings from custom.js or default if undefined
+  const ragSettingsToUse = window.currentRagSettings || {
+    collectionName: null,
+    kValue: 3,
+    filter: null,
+  };
+
   const payload = {
     query: query,
-    collection_name: currentRagSettings.collectionName,
-    k: currentRagSettings.kValue,
-    filter: currentRagSettings.filter,
+    collection_name: ragSettingsToUse.collectionName,
+    k: ragSettingsToUse.kValue,
+    filter: ragSettingsToUse.filter,
   };
 
   console.log("RAG_UI: Performing Direct RAG Search with payload:", payload);
@@ -245,7 +278,7 @@ function handleDirectRagSearch() {
   searchModal.show();
 
   $.ajax({
-    url: "/api/rag/direct_search",
+    url: "/api/rag/direct_search", // Correct endpoint
     type: "POST",
     contentType: "application/json",
     data: JSON.stringify(payload),
@@ -259,14 +292,15 @@ function handleDirectRagSearch() {
         "RAG_UI: Direct RAG Search error:",
         textStatus,
         errorThrown,
+        jqXHR.responseText,
       );
       const errorMsg = jqXHR.responseJSON
         ? jqXHR.responseJSON.error
         : "Failed to perform RAG search.";
       $("#directRagSearchResultsBody").html(
-        `<p class="text-danger">Error: ${escapeHtml(errorMsg)}</p>`, // escapeHtml from utils.js
+        `<p class="text-danger">Error: ${escapeHtml(errorMsg)}</p>`,
       );
-      showToast("Error", `Direct RAG Search failed: ${errorMsg}`, "danger"); // showToast from utils.js
+      showToast("Error", `Direct RAG Search failed: ${errorMsg}`, "danger");
     },
   });
 }
@@ -281,39 +315,59 @@ function initRagEventListeners() {
   });
 
   $("#rag-toggle-switch").on("change", function () {
-    window.currentRagSettings.enabled = $(this).is(":checked"); // Modify global
+    if (
+      typeof window.currentRagSettings === "undefined" ||
+      window.currentRagSettings === null
+    )
+      window.currentRagSettings = {};
+    window.currentRagSettings.enabled = $(this).is(":checked");
     sendRagSettingsUpdate();
   });
 
   $("#rag-collection-select").on("change", function () {
-    window.currentRagSettings.collectionName = $(this).val() || null; // Modify global
+    if (
+      typeof window.currentRagSettings === "undefined" ||
+      window.currentRagSettings === null
+    )
+      window.currentRagSettings = {};
+    window.currentRagSettings.collectionName = $(this).val() || null;
     sendRagSettingsUpdate();
   });
 
   $("#rag-k-value").on("change", function () {
     const val = parseInt($(this).val(), 10);
-    window.currentRagSettings.kValue = isNaN(val) ? 3 : val; // Modify global
+    if (
+      typeof window.currentRagSettings === "undefined" ||
+      window.currentRagSettings === null
+    )
+      window.currentRagSettings = {};
+    window.currentRagSettings.kValue = isNaN(val) ? 3 : val;
     sendRagSettingsUpdate();
   });
 
   $("#rag-filter-input").on("change", function () {
     const filterStr = $(this).val().trim();
+    if (
+      typeof window.currentRagSettings === "undefined" ||
+      window.currentRagSettings === null
+    )
+      window.currentRagSettings = {};
     if (filterStr === "") {
-      window.currentRagSettings.filter = null; // Modify global
+      window.currentRagSettings.filter = null;
     } else {
       try {
         const parsedFilter = JSON.parse(filterStr);
         if (typeof parsedFilter === "object" && parsedFilter !== null) {
-          window.currentRagSettings.filter = parsedFilter; // Modify global
+          window.currentRagSettings.filter = parsedFilter;
         } else {
           showToast(
-            // showToast from utils.js
             "Error",
-            'Invalid JSON for RAG filter. It must be an object (e.g., {"key": "value"}).',
+            'Invalid JSON for RAG filter. It must be an object (e.g., {"key": "value"}). Sticking to previous value.',
             "danger",
           );
+          // Revert input to previous valid state
           $(this).val(
-            window.currentRagSettings.filter && // Access global
+            window.currentRagSettings.filter &&
               Object.keys(window.currentRagSettings.filter).length > 0
               ? JSON.stringify(window.currentRagSettings.filter)
               : "",
@@ -321,9 +375,14 @@ function initRagEventListeners() {
           return;
         }
       } catch (e) {
-        showToast("Error", "Invalid JSON format for RAG filter.", "danger"); // showToast from utils.js
+        showToast(
+          "Error",
+          "Invalid JSON format for RAG filter. Sticking to previous value.",
+          "danger",
+        );
+        // Revert input to previous valid state
         $(this).val(
-          window.currentRagSettings.filter && // Access global
+          window.currentRagSettings.filter &&
             Object.keys(window.currentRagSettings.filter).length > 0
             ? JSON.stringify(window.currentRagSettings.filter)
             : "",
