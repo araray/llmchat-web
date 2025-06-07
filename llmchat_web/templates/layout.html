@@ -25,18 +25,20 @@
 
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
         <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-        <!-- Ensure utils.js is loaded before other custom scripts -->
+        <!-- Ensure utils.js is loaded first as it initializes global state -->
         <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
-        <!-- API modules -->
+        <!-- API modules can be loaded next -->
         <script src="{{ url_for('static', filename='js/session_api.js') }}"></script>
-        <!-- UI modules -->
-        <script src="{{ url_for('static', filename='js/chat_ui.js') }}"></script>
+        <!-- UI modules that provide functions should be loaded before those that call them. -->
+        <!-- Corrected Load Order: Load modules with function definitions first. -->
         <script src="{{ url_for('static', filename='js/rag_ui.js') }}"></script>
         <script src="{{ url_for('static', filename='js/llm_settings_ui.js') }}"></script>
         <script src="{{ url_for('static', filename='js/context_manager_ui.js') }}"></script>
         <script src="{{ url_for('static', filename='js/prompt_template_ui.js') }}"></script>
         <script src="{{ url_for('static', filename='js/ingestion_ui.js') }}"></script>
-        <!-- Main controller/initializer, loaded last -->
+        <!-- UI modules that consume other functions can be loaded after. -->
+        <script src="{{ url_for('static', filename='js/chat_ui.js') }}"></script>
+        <!-- Main controller/initializer, loaded last to ensure all functions it calls are defined. -->
         <script src="{{ url_for('static', filename='js/main_controller.js') }}"></script>
         {% block scripts_extra %}{% endblock %}
     </body>
