@@ -3,8 +3,10 @@
 /**
  * @file llm_settings_ui.js
  * @description Handles UI logic for LLM provider/model selection and system messages.
+ * This version now triggers real-time full context token updates when the
+ * provider or model is changed.
  * Depends on utils.js for helper functions (escapeHtml, showToast) and
- * accesses/modifies global variables from custom.js (window.currentLlmSettings).
+ * accesses/modifies global variables from main_controller.js (window.currentLlmSettings).
  */
 
 /**
@@ -174,7 +176,8 @@ function fetchAndPopulateLlmModels(providerName) {
 /**
  * Sends selected LLM provider and model to the backend.
  * Updates global `window.currentLlmSettings` and UI status display.
- * Uses global `showToast`.
+ * Also triggers a full context preview update upon success.
+ * Uses global `showToast` and `updateFullContextPreview`.
  */
 function applyLlmSettings() {
   const providerName = $("#llm-provider-select").val();
@@ -231,6 +234,11 @@ function applyLlmSettings() {
         );
         $("#status-model").text(window.currentLlmSettings.modelName || "N/A");
         showToast("Success", "LLM settings applied successfully!", "success");
+
+        // After successfully applying settings, trigger a context preview update.
+        if (typeof updateFullContextPreview === "function") {
+          updateFullContextPreview();
+        }
       }
     },
     error: function (jqXHR, textStatus, errorThrown) {
@@ -309,7 +317,8 @@ function fetchAndDisplaySystemMessage() {
 /**
  * Sends the updated system message to the backend.
  * Updates global `window.currentLlmSettings`.
- * Uses global `showToast`.
+ * Also triggers a full context preview update upon success.
+ * Uses global `showToast` and `updateFullContextPreview`.
  */
 function applySystemMessage() {
   const systemMessage = $("#system-message-input").val();
@@ -340,6 +349,11 @@ function applySystemMessage() {
         }
         window.currentLlmSettings.systemMessage = response.system_message;
         showToast("Success", "System message applied successfully!", "success");
+
+        // After applying the system message, trigger a context preview update.
+        if (typeof updateFullContextPreview === "function") {
+          updateFullContextPreview();
+        }
       }
     },
     error: function (jqXHR, textStatus, errorThrown) {
@@ -358,7 +372,7 @@ function applySystemMessage() {
  * Initializes event listeners for LLM settings controls.
  */
 function initLlmSettingsEventListeners() {
-  // Provider selection changes, fetch models
+  // Provider selection changes, fetch models and update context preview
   $("#llm-provider-select").on("change", function () {
     const selectedProvider = $(this).val();
     if (selectedProvider) {
@@ -368,6 +382,17 @@ function initLlmSettingsEventListeners() {
         .empty()
         .append('<option value="">Select provider first</option>')
         .prop("disabled", true);
+    }
+    // Note: We don't trigger preview here because the model isn't selected yet.
+    // The model 'change' event will handle the final trigger.
+  });
+
+  // Model selection changes, update context preview
+  $("#llm-model-select").on("change", function () {
+    // No need to do anything here except trigger the preview,
+    // as the settings are only persisted on "Apply".
+    if (typeof updateFullContextPreview === "function") {
+      updateFullContextPreview();
     }
   });
 
