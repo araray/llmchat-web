@@ -1,14 +1,15 @@
 # llmchat_web/routes/core_routes.py
 """
 Core Flask routes for the llmchat-web application.
-Handles serving the main page, API status, basic commands, and log retrieval.
+Handles serving the main page, API status, basic commands, log retrieval,
+and utility functions like token estimation.
 """
 import logging
 import uuid
 from datetime import datetime
-from typing import Any, Dict
-from pathlib import Path # Add Path
-import os # Add os
+from typing import Any, Dict, Optional # Added Optional
+from pathlib import Path
+import os
 
 from flask import jsonify, render_template, request
 from flask import session as flask_session # Alias to avoid confusion
@@ -26,6 +27,9 @@ from ..app import (
     logger as app_logger, # Main app logger, can be used as parent
     APP_VERSION
 )
+
+# Added LLMCoreError and ProviderError for new endpoint
+from llmcore import LLMCoreError, ProviderError
 
 # Configure a local logger for this specific routes module
 # This logger will be a child of "llmchat_web.routes"
@@ -276,4 +280,52 @@ def api_logs_route() -> Any:
         logger.error(f"Error reading log file {log_file_path}: {e}", exc_info=True)
         return jsonify({"error": f"Failed to read log file: {str(e)}", "logs": ""}), 500
 
-logger.info("Core routes (index, /api/status, /api/command, /api/logs) defined on core_bp.")
+
+@core_bp.route("/api/utils/estimate_tokens", methods=["POST"])
+@async_to_sync_in_flask
+async def estimate_tokens_route() -> Any:
+    """
+    API endpoint to estimate the token count for a given string using
+    a specified provider and model. This enables UI features like live
+    token counting for text areas.
+
+    Expects JSON payload: {
+        "text": "The string to tokenize.",
+        "provider_name": "The LLM provider to use for tokenization.",
+        "model_name": "Optional: The specific model for context."
+    }
+    """
+    if not llmcore_instance:
+        logger.error("Attempted to estimate tokens, but LLM service is not available.")
+        return jsonify({"error": "LLM service not available."}), 503
+
+    data = request.json
+    if not data or "text" not in data or "provider_name" not in data:
+        logger.warning("Token estimation API called without 'text' or 'provider_name' fields.")
+        return jsonify({"error": "Missing required fields: 'text' and 'provider_name'."}), 400
+
+    text_to_tokenize = data["text"]
+    provider_name = data["provider_name"]
+    model_name = data.get("model_name") # Optional
+
+    try:
+        token_count = await llmcore_instance.estimate_tokens(
+            text=text_to_tokenize,
+            provider_name=provider_name,
+            model_name=model_name
+        )
+        logger.debug(f"Estimated {token_count} tokens for text (len: {len(text_to_tokenize)}) "
+                     f"with provider '{provider_name}' (model: {model_name or 'default'}).")
+        return jsonify({"token_count": token_count})
+    except ProviderError as e:
+        logger.error(f"ProviderError during token estimation for provider '{provider_name}': {e}", exc_info=True)
+        return jsonify({"error": f"Provider error during token estimation: {str(e)}"}), 500
+    except LLMCoreError as e: # Catch other LLMCore errors
+        logger.error(f"LLMCoreError during token estimation for provider '{provider_name}': {e}", exc_info=True)
+        return jsonify({"error": f"LLMCore error during token estimation: {str(e)}"}), 500
+    except Exception as e_unexp:
+        logger.error(f"Unexpected error during token estimation: {e_unexp}", exc_info=True)
+        return jsonify({"error": "An unexpected server error occurred during token estimation."}), 500
+
+
+logger.info("Core routes (index, /api/status, /api/command, /api/logs, /api/utils/estimate_tokens) defined on core_bp.")
