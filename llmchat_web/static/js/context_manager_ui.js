@@ -4,12 +4,81 @@
  * @file context_manager_ui.js
  * @description Handles UI logic for the Context Manager tab, including workspace items,
  * active context specification, history context selection, and context preview.
- * This version adds support for the "UI Managed" Prompt Workbench mode.
+ * This version adds support for the "UI Managed" Prompt Workbench mode and
+ * introduces a debounced function to update the global context token count in real-time.
  * Depends on utils.js and accesses/modifies global state from main_controller.js.
  */
 
-// Debounce timer for token estimation to avoid excessive API calls
+// Debounce timers to avoid excessive API calls
 let tokenEstimateDebounceTimer;
+let fullContextPreviewDebounceTimer;
+
+// =================================================================================
+// SECTION: Full Context Preview (for Top Bar Token Count)
+// =================================================================================
+
+/**
+ * Fetches a full context preview from the backend to get an accurate token count.
+ * This function is debounced to avoid excessive API calls during rapid UI changes.
+ * It updates the main context usage display in the top bar.
+ * Relies on global state variables for session ID, staged items, and all settings.
+ */
+function updateFullContextPreview() {
+  clearTimeout(fullContextPreviewDebounceTimer);
+  fullContextPreviewDebounceTimer = setTimeout(async () => {
+    if (!window.currentLlmSessionId) {
+      // Don't try to update if there's no session active
+      return;
+    }
+
+    // Don't run this preview if in UI Managed mode, as the context is different.
+    const isUIManaged = $("#context-mode-toggle").is(":checked");
+    if (isUIManaged) {
+      return;
+    }
+
+    const payload = {
+      // The user's current query from the main chat input affects context
+      current_query: $("#chat-input").val() || "",
+      staged_items: window.stagedContextItems || [],
+      // RAG and LLM settings are read from the Flask session on the backend,
+      // so we don't need to send them all explicitly. The backend /api/context/preview
+      // endpoint is designed to use the current session's settings.
+    };
+
+    try {
+      const response = await fetch(
+        `/api/sessions/${window.currentLlmSessionId}/context/preview`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+
+      if (!response.ok) {
+        // Silently fail in the UI to not bother the user. Log to console.
+        const errData = await response.json().catch(() => ({}));
+        console.warn(
+          "CTX_MAN_UI: Failed to fetch full context preview for token count:",
+          errData.error || "API error",
+        );
+        return;
+      }
+
+      const data = await response.json();
+      // The `updateContextUsageDisplay` function is in utils.js
+      if (typeof updateContextUsageDisplay === "function") {
+        updateContextUsageDisplay(data);
+      }
+    } catch (error) {
+      console.warn(
+        "CTX_MAN_UI: Network error fetching full context preview:",
+        error,
+      );
+    }
+  }, 500); // 500ms debounce delay
+}
 
 // =================================================================================
 // SECTION: UI Mode Switching (LLMCore Managed vs. UI Managed)
@@ -36,6 +105,7 @@ function switchContextManagerMode() {
     } else if ($("#history-subtab-btn").hasClass("active")) {
       fetchAndDisplayHistoryContext();
     }
+    updateFullContextPreview(); // Trigger a context preview update when switching back
   }
 }
 
@@ -293,6 +363,7 @@ function addStagedContextItem(
     no_truncate: no_truncate,
   });
   renderStagedContextItems();
+  updateFullContextPreview(); // Trigger update on change
   console.log(
     "CTX_MAN_UI: Added to staged items:",
     window.stagedContextItems[window.stagedContextItems.length - 1],
@@ -308,6 +379,7 @@ function removeStagedContextItem(spec_item_id_to_remove) {
     (item) => item.spec_item_id !== spec_item_id_to_remove,
   );
   renderStagedContextItems();
+  updateFullContextPreview(); // Trigger update on change
   console.log(
     `CTX_MAN_UI: Removed staged item ${spec_item_id_to_remove}. Remaining:`,
     window.stagedContextItems,
@@ -526,6 +598,7 @@ function initContextManagerEventListeners() {
       } else if ($("#history-subtab-btn").hasClass("active")) {
         fetchAndDisplayHistoryContext();
       }
+      updateFullContextPreview();
     } else {
       updatePromptWorkbenchTokenEstimate();
     }
@@ -535,10 +608,12 @@ function initContextManagerEventListeners() {
   $("#workspace-subtab-btn").on("shown.bs.tab", function () {
     fetchAndDisplayWorkspaceItems();
     renderStagedContextItems();
+    updateFullContextPreview();
   });
 
   $("#history-subtab-btn").on("shown.bs.tab", function () {
     fetchAndDisplayHistoryContext();
+    updateFullContextPreview();
   });
 
   // ... (existing listeners for workspace, staging, history, preview) ...
@@ -626,6 +701,7 @@ function initContextManagerEventListeners() {
         );
         $("#form-add-text-snippet")[0].reset();
         fetchAndDisplayWorkspaceItems();
+        updateFullContextPreview(); // Trigger update on change
       },
       error: function (jqXHR) {
         const errorMsg =
@@ -661,6 +737,7 @@ function initContextManagerEventListeners() {
         );
         $("#form-add-file-by-path")[0].reset();
         fetchAndDisplayWorkspaceItems();
+        updateFullContextPreview(); // Trigger update on change
       },
       error: function (jqXHR) {
         const errorMsg =
@@ -728,6 +805,7 @@ function initContextManagerEventListeners() {
                     !(si.type === "workspace_item" && si.id_ref === itemId),
                 );
                 renderStagedContextItems();
+                updateFullContextPreview(); // Trigger update on change
               },
               error: function () {
                 showToast("Error", "Error removing item.", "danger");
@@ -814,6 +892,7 @@ function initContextManagerEventListeners() {
         if (newContent !== null) {
           item.content = newContent;
           renderStagedContextItems();
+          updateFullContextPreview(); // Trigger update on change
           showToast("Updated", `Staged item ${specItemId} updated.`, "info");
         }
       } else {
@@ -861,18 +940,30 @@ function initContextManagerEventListeners() {
     });
   });
 
+  // Listen to changes on history selection checkboxes
+  $("#history-context-message-list").on(
+    "change",
+    ".form-check-input",
+    function () {
+      updateFullContextPreview();
+    },
+  );
+
   $("#history-context-select-all").on("click", function () {
     $("#history-context-message-list .form-check-input").prop("checked", true);
+    updateFullContextPreview();
   });
 
   $("#history-context-deselect-all").on("click", function () {
     $("#history-context-message-list .form-check-input").prop("checked", false);
+    updateFullContextPreview();
   });
 
   $("#history-context-invert").on("click", function () {
     $("#history-context-message-list .form-check-input").each(function () {
       $(this).prop("checked", !$(this).prop("checked"));
     });
+    updateFullContextPreview();
   });
 
   $("#btn-save-context-selection").on("click", function () {
