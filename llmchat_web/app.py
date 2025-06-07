@@ -53,7 +53,8 @@ from llmcore.models import Message as LLMCoreMessage, ChatSession as LLMCoreChat
 try:
     APP_VERSION = version("llmchat-web")
 except PackageNotFoundError:
-    APP_VERSION = "0.11.9"
+    from .get_version import _get_version_from_pyproject
+    APP_VERSION = _get_version_from_pyproject()
     logging.getLogger("llmchat_web_startup").info(
         f"llmchat-web package not found, using fallback version: {APP_VERSION}."
     )
