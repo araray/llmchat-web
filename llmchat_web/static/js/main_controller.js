@@ -4,11 +4,13 @@
  * @file main_controller.js
  * @description Main JavaScript controller for the llmchat-web interface.
  * This file initializes various UI modules and handles global state management,
- * initial status fetching, session list display, log display, and remaining top-level UI interactions
- * like the REPL command input.
+ * initial status fetching, session list display, log display, and remaining top-level UI interactions.
  *
  * Global state variables (e.g., window.currentLlmSettings) are initialized in utils.js.
  * This script populates them based on backend status and user interactions.
+ *
+ * As part of the Phase 2 UI refactoring, the dedicated "Logs" tab and its event handler have been removed.
+ * Log viewing is now handled via a modal triggered by a button in the "Settings" pane.
  *
  * Depends on:
  * - utils.js (for global state init, escapeHtml, showToast, etc.)
@@ -154,13 +156,13 @@ function fetchAndUpdateInitialStatus() {
         $("#chat-messages")
           .empty()
           .append(
-            '<div class="message-bubble agent-message">No active session. Create or load one.</div>',
+            '&lt;div class="message-bubble agent-message"&gt;No active session. Create or load one.&lt;/div&gt;',
           );
         $("#workspace-items-list").html(
-          '<p class="text-muted p-2">No active session to load workspace items from.</p>',
+          '&lt;p class="text-muted p-2"&gt;No active session to load workspace items from.&lt;/p&gt;',
         );
         $("#active-context-spec-list").html(
-          '<p class="text-muted p-2">No active session for context items.</p>',
+          '&lt;p class="text-muted p-2"&gt;No active session for context items.&lt;/p&gt;',
         );
         window.stagedContextItems = []; // Clear staged items for new/no session
         if (typeof renderStagedContextItems === "function")
@@ -209,15 +211,15 @@ function fetchAndDisplaySessions() {
       const $sessionList = $("#session-list").empty();
       if (sessions && sessions.length > 0) {
         sessions.forEach(function (session) {
-          const $sessionItem = $("<a>", {
+          const $sessionItem = $("&lt;a&gt;", {
             href: "#",
             class: "list-group-item list-group-item-action",
             "data-session-id": session.id,
-            html: `<div class="d-flex w-100 justify-content-between">
-                                   <h6 class="mb-1">${escapeHtml(session.name) || escapeHtml(session.id.substring(0, 15)) + "..."}</h6>
-                                   <small class="text-muted">${new Date(session.updated_at).toLocaleString()}</small>
-                               </div>
-                               <small class="text-muted">Messages: ${session.message_count || 0}</small>`,
+            html: `&lt;div class="d-flex w-100 justify-content-between"&gt;
+                                   &lt;h6 class="mb-1"&gt;${escapeHtml(session.name) || escapeHtml(session.id.substring(0, 15)) + "..."}&lt;/h6&gt;
+                                   &lt;small class="text-muted"&gt;${new Date(session.updated_at).toLocaleString()}&lt;/small&gt;
+                               &lt;/div&gt;
+                               &lt;small class="text-muted"&gt;Messages: ${session.message_count || 0}&lt;/small&gt;`,
           });
           if (session.id === window.currentLlmSessionId) {
             $sessionItem.addClass("active");
@@ -231,7 +233,7 @@ function fetchAndDisplaySessions() {
         }
       } else {
         $sessionList.append(
-          '<p class="text-muted small m-2">No saved sessions found.</p>',
+          '&lt;p class="text-muted small m-2"&gt;No saved sessions found.&lt;/p&gt;',
         );
         $("#btn-delete-session").prop("disabled", true);
       }
@@ -243,22 +245,23 @@ function fetchAndDisplaySessions() {
         errorThrown,
       );
       $("#session-list").html(
-        '<p class="text-danger small m-2">Error loading sessions.</p>',
+        '&lt;p class="text-danger small m-2"&gt;Error loading sessions.&lt;/p&gt;',
       );
       $("#btn-delete-session").prop("disabled", true);
     });
 }
 
 /**
- * Fetches application logs from the backend and displays them in the Logs tab.
+ * Fetches application logs from the backend and displays them in the designated element.
+ * This function is now generic and populates any target element, making it suitable for the new logs modal.
  */
 function fetchAndDisplayAppLogs() {
-  const $logsDisplay = $("#app-logs-display");
+  const $logsDisplay = $("#app-logs-display"); // This ID is inside the modal
   $logsDisplay.text("Fetching logs..."); // Placeholder while loading
   console.log("MAIN_CTRL: Fetching application logs...");
 
   $.ajax({
-    url: "/api/logs", // The new endpoint
+    url: "/api/logs", // The endpoint for fetching logs
     type: "GET",
     dataType: "json",
     success: function (response) {
@@ -295,7 +298,7 @@ $(document).ready(function () {
   if ($("#toast-container").length === 0) {
     // Ensure toast container exists
     $("body").append(
-      '<div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1056"></div>',
+      '&lt;div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1056"&gt;&lt;/div&gt;',
     );
   }
 
@@ -338,7 +341,7 @@ $(document).ready(function () {
         $("#chat-messages")
           .empty()
           .append(
-            '<div class="message-bubble agent-message">New session started.</div>',
+            '&lt;div class="message-bubble agent-message"&gt;New session started.&lt;/div&gt;',
           );
 
         // Deactivate any currently active session in the UI
@@ -346,15 +349,15 @@ $(document).ready(function () {
 
         // Manually prepend the new, temporary session to the list UI
         const newSessionId = newSessionResponse.id;
-        const $newSessionItem = $("<a>", {
+        const $newSessionItem = $("&lt;a&gt;", {
           href: "#",
           class: "list-group-item list-group-item-action active", // Mark as active
           "data-session-id": newSessionId,
-          html: `<div class="d-flex w-100 justify-content-between">
-                       <h6 class="mb-1 text-primary"><em>New Session...</em></h6>
-                       <small class="text-muted">Just now</small>
-                   </div>
-                   <small class="text-muted">Messages: 0</small>`,
+          html: `&lt;div class="d-flex w-100 justify-content-between"&gt;
+                       &lt;h6 class="mb-1 text-primary"&gt;&lt;em&gt;New Session...&lt;/em&gt;&lt;/h6&gt;
+                       &lt;small class="text-muted"&gt;Just now&lt;/small&gt;
+                   &lt;/div&gt;
+                   &lt;small class="text-muted"&gt;Messages: 0&lt;/small&gt;`,
         });
         $("#session-list").prepend($newSessionItem);
 
@@ -470,7 +473,7 @@ $(document).ready(function () {
           });
         } else {
           $("#chat-messages").append(
-            '<div class="message-bubble agent-message">Session loaded. No messages yet.</div>',
+            '&lt;div class="message-bubble agent-message"&gt;Session loaded. No messages yet.&lt;/div&gt;',
           );
         }
 
@@ -590,21 +593,34 @@ $(document).ready(function () {
     );
   });
 
-  // --- Tab Show Event Handlers ---
-  $("#settings-tab-btn").on("shown.bs.tab", function () {
-    console.log("MAIN_CTRL: Settings tab shown.");
-    // UI modules handle their own specific updates based on globals if needed
-    if (typeof fetchAndPopulateLlmProviders === "function")
-      fetchAndPopulateLlmProviders();
-    if (typeof fetchAndDisplaySystemMessage === "function")
-      fetchAndDisplaySystemMessage();
-    if (typeof fetchAndDisplayPromptTemplateValues === "function")
-      fetchAndDisplayPromptTemplateValues();
-  });
+  // --- Rationale Block: [UI-01] Logs Modal Implementation ---
+  // Pre-state: A 'shown.bs.tab' event handler existed for a "#logs-tab-btn", which
+  //            populated a dedicated "Logs" tab pane.
+  // Limitation: The UI specification (spec2.md) required removing the "Logs" tab
+  //             to de-clutter the interface.
+  // Decision Path: The old event handler for the non-existent tab is removed.
+  //                A new event handler is created for the "#btn-view-app-logs" button,
+  //                which is now located in the "Settings" pane. This new handler
+  //                calls the existing `fetchAndDisplayAppLogs` function (which already
+  //                targets the correct element inside the modal) and then programmatically
+  //                shows the Bootstrap modal for logs.
+  // Post-state: The "Logs" tab logic is gone. Clicking the "View Application Logs"
+  //             button in the settings pane now correctly fetches logs and displays
+  //             them in the `#appLogsModal` as required.
+  // --- End Rationale Block ---
 
-  $("#logs-tab-btn").on("shown.bs.tab", function () {
-    console.log("MAIN_CTRL: Logs tab shown. Fetching logs...");
+  // New event handler for the "View Application Logs" button in the Settings pane
+  $("#btn-view-app-logs").on("click", function () {
+    console.log(
+      "MAIN_CTRL: View App Logs button clicked. Fetching logs for modal...",
+    );
+    // The fetchAndDisplayAppLogs function already targets the modal's content area
     fetchAndDisplayAppLogs();
+    // Manually trigger the modal to show
+    var appLogsModal = new bootstrap.Modal(
+      document.getElementById("appLogsModal"),
+    );
+    appLogsModal.show();
   });
 
   // --- Chat Input Token Estimator ---
@@ -617,6 +633,9 @@ $(document).ready(function () {
     updateChatInputTokenEstimate();
 
   // --- REPL Command Input ---
+  // This is a placeholder for a future feature and is not part of the current core UI flow.
+  // It has been removed from the visible UI in index.html for the Phase 2 refactor,
+  // but the logic is kept here in case it's reinstated.
   $("#repl-command-input").on("keypress", function (e) {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -625,7 +644,7 @@ $(document).ready(function () {
         console.log("MAIN_CTRL: REPL command to send:", commandText);
         $("#repl-command-output").prepend(
           // Add to top
-          `<div class="text-info"><i class="fas fa-angle-right"></i> ${escapeHtml(commandText)}</div>`,
+          `&lt;div class="text-info"&gt;&lt;i class="fas fa-angle-right"&gt;&lt;/i&gt; ${escapeHtml(commandText)}&lt;/div&gt;`,
         );
         $(this).val(""); // Clear input
         $.ajax({
@@ -636,14 +655,14 @@ $(document).ready(function () {
           dataType: "json",
           success: function (response) {
             console.log("MAIN_CTRL: REPL command response:", response);
-            let outputHtml = `<div class="${response.status === "error" ? "text-danger" : response.status === "executed" ? "text-success" : "text-white-50"}">`;
+            let outputHtml = `&lt;div class="${response.status === "error" ? "text-danger" : response.status === "executed" ? "text-success" : "text-white-50"}"&gt;`;
             if (response.output)
-              outputHtml += `<i class="fas fa-check-circle"></i> ${escapeHtml(response.output)}`;
+              outputHtml += `&lt;i class="fas fa-check-circle"&gt;&lt;/i&gt; ${escapeHtml(response.output)}`;
             else if (response.command_received)
-              outputHtml += `<i class="fas fa-check-circle"></i> Command '${escapeHtml(response.command_received)}' acknowledged. Status: ${escapeHtml(response.status || "unknown")}`;
+              outputHtml += `&lt;i class="fas fa-check-circle"&gt;&lt;/i&gt; Command '${escapeHtml(response.command_received)}' acknowledged. Status: ${escapeHtml(response.status || "unknown")}`;
             else
-              outputHtml += `<i class="fas fa-info-circle"></i> Empty response from server.`;
-            outputHtml += `</div>`;
+              outputHtml += `&lt;i class="fas fa-info-circle"&gt;&lt;/i&gt; Empty response from server.`;
+            outputHtml += `&lt;/div&gt;`;
             $("#repl-command-output").prepend(outputHtml);
             // Limit number of output lines in REPL
             const maxReplLines = 50;
@@ -661,7 +680,7 @@ $(document).ready(function () {
               ? jqXHR.responseJSON.error
               : "Failed to send command.";
             $("#repl-command-output").prepend(
-              `<div class="text-danger"><i class="fas fa-exclamation-triangle"></i> Error: ${escapeHtml(errorMsg)}</div>`,
+              `&lt;div class="text-danger"&gt;&lt;i class="fas fa-exclamation-triangle"&gt;&lt;/i&gt; Error: ${escapeHtml(errorMsg)}&lt;/div&gt;`,
             );
           },
         });
