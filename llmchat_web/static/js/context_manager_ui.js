@@ -10,7 +10,7 @@
  */
 
 // Debounce timers to avoid excessive API calls
-let tokenEstimateDebounceTimer;
+// 'tokenEstimateDebounceTimer' is declared globally in utils.js
 let fullContextPreviewDebounceTimer;
 
 // =================================================================================
