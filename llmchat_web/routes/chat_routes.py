@@ -73,8 +73,14 @@ async def _resolve_staged_items_for_core(
                 resolved_item = await llmcore_instance.get_context_item(session_id_for_staging, item_id_ref)
                 if resolved_item: logger.debug(f"Resolved staged workspace_item: {item_id_ref}")
             elif item_type_str == "file_content" and item_path:
-                resolved_item = LLMCoreContextItem(id=item_spec_id, type=LLMCoreContextItemType.USER_FILE, content=item_content, source_id=item_path, metadata={"filename": Path(item_path).name, "llmchat_web_staged": True, "ignore_char_limit": no_truncate})
-                logger.debug(f"Created staged file_content item for path: {item_path}")
+                # This logic now reads the file from the server-side path.
+                file_path_obj = Path(item_path).expanduser()
+                if file_path_obj.is_file():
+                    file_content_from_path = file_path_obj.read_text(encoding='utf-8', errors='ignore')
+                    resolved_item = LLMCoreContextItem(id=item_spec_id, type=LLMCoreContextItemType.USER_FILE, content=file_content_from_path, source_id=item_path, metadata={"filename": file_path_obj.name, "llmchat_web_staged": True, "ignore_char_limit": no_truncate})
+                    logger.debug(f"Read and created staged file_content item for path: {item_path} (Content length: {len(file_content_from_path)})")
+                else:
+                    logger.warning(f"Staged file_content path does not exist or is not a file: {item_path}")
             elif item_type_str == "text_content" and item_content is not None:
                 resolved_item = LLMCoreContextItem(id=item_spec_id, type=LLMCoreContextItemType.USER_TEXT, content=item_content, source_id=item_spec_id, metadata={"llmchat_web_staged": True, "ignore_char_limit": no_truncate})
                 logger.debug(f"Created staged text_content item with ID: {item_spec_id}")
