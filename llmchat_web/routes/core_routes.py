@@ -22,6 +22,7 @@ from ..app import (
     llmcore_instance,
     llmcore_init_error, # The global init error from app.py
     async_to_sync_in_flask,
+    get_context_usage_info, # Import the helper function
     get_current_web_session_id,
     set_current_web_session_id,
     logger as app_logger, # Main app logger, can be used as parent
@@ -116,11 +117,12 @@ def index() -> str:
 
 
 @core_bp.route("/api/status", methods=["GET"])
-def api_status() -> Any:
+@async_to_sync_in_flask
+async def api_status() -> Any:
     """
     API endpoint to check the status of the backend and LLMCore.
     Returns current provider/model, session ID, RAG settings, system message,
-    prompt template values from Flask session, and application version.
+    prompt template values, context usage info, and application version.
     """
     llmcore_status_val = "operational"
     llmcore_error_detail_val = None
@@ -145,15 +147,12 @@ def api_status() -> Any:
     current_provider_val = flask_session.get('current_provider_name', llmcore_default_provider_val)
     current_model_val = flask_session.get('current_model_name', llmcore_default_model_val)
 
-    # Critical fix: If provider is set but model isn't, try to derive model from provider's default
-    # This ensures consistency, especially if a new session has a provider but model is None
     if current_provider_val and current_model_val is None:
         if llmcore_instance and llmcore_instance.config:
             provider_specific_default_model = llmcore_instance.config.get(f"providers.{current_provider_val}.default_model")
             if provider_specific_default_model:
                 current_model_val = provider_specific_default_model
                 logger.debug(f"API Status: Model was None for provider '{current_provider_val}', set to provider's default: '{current_model_val}'.")
-
 
     current_session_id_val = get_current_web_session_id()
     rag_enabled_val = flask_session.get('rag_enabled', False)
@@ -162,6 +161,9 @@ def api_status() -> Any:
     rag_filter_val = flask_session.get('rag_filter')
     system_message_val = flask_session.get('system_message', "")
     prompt_template_values_val = flask_session.get('prompt_template_values', {})
+
+    # Fetch context usage info for the current session
+    context_usage_val = await get_context_usage_info(current_session_id_val)
 
     status_payload: Dict[str, Any] = {
         "service_status": "operational",
@@ -178,8 +180,9 @@ def api_status() -> Any:
         "rag_filter": rag_filter_val,
         "system_message": system_message_val,
         "prompt_template_values": prompt_template_values_val,
+        "context_usage": context_usage_val, # Add the context usage to the payload
     }
-    logger.debug(f"API Status Check. LLMCore: {llmcore_status_val}. Current Session: {current_session_id_val}. Provider: {current_provider_val}, Model: {current_model_val}")
+    logger.debug(f"API Status Check. LLMCore: {llmcore_status_val}. Session: {current_session_id_val}. ContextUsage: {context_usage_val}")
     return jsonify(status_payload)
 
 
@@ -199,24 +202,11 @@ async def api_command_route() -> Any:
     command_text: str = data["command"]
     logger.info(f"Received command via API: '{command_text}'")
 
-    # Placeholder for command execution logic
-    # Example:
-    # if command_text.lower() == "/ping":
-    #     output = "pong"
-    # elif command_text.startswith("/get_config"):
-    #     key = command_text.split(" ", 1)[1] if len(command_text.split(" ", 1)) > 1 else None
-    #     if llmcore_instance and llmcore_instance.config and key:
-    #         output = f"Config '{key}': {llmcore_instance.config.get(key, 'Not found')}"
-    #     else:
-    #         output = "LLMCore or key not available for config lookup."
-    # else:
-    #     output = f"Command '{command_text}' acknowledged. Execution not yet implemented."
-
     response_output = f"Command received: '{command_text}'. (Execution placeholder)"
     return jsonify({
         "command_received": command_text,
         "output": response_output,
-        "status": "acknowledged_placeholder" # Can be 'executed', 'failed', etc. in future
+        "status": "acknowledged_placeholder"
     })
 
 @core_bp.route("/api/logs", methods=["GET"])
@@ -230,32 +220,28 @@ def api_logs_route() -> Any:
     log_lines_to_fetch = request.args.get("lines", 200, type=int)
     max_lines_cap = 2000 # Safety cap
     if log_lines_to_fetch <= 0:
-        log_lines_to_fetch = 200 # Default if invalid
+        log_lines_to_fetch = 200
     elif log_lines_to_fetch > max_lines_cap:
         log_lines_to_fetch = max_lines_cap
         logger.info(f"Requested log lines ({request.args.get('lines')}) exceeded cap, using {max_lines_cap}.")
 
-
     log_file_name = "llmchat_web_daemon.stderr.log"
     log_file_path_str = ""
 
-    # Attempt to construct path using appdirs, similar to how llmchat CLI might.
-    # This makes it more robust than hardcoding `~/.config`.
     try:
-        from appdirs import user_config_dir # Optional import
-        app_config_dir = Path(user_config_dir("llmchat", appauthor=False)) # appauthor=False for generic path
+        from appdirs import user_config_dir
+        app_config_dir = Path(user_config_dir("llmchat", appauthor=False))
         log_file_path = app_config_dir / "logs" / log_file_name
         log_file_path_str = str(log_file_path)
         logger.debug(f"Constructed log file path using appdirs: {log_file_path}")
     except ImportError:
         logger.warning("'appdirs' library not found. Falling back to manual path construction for logs.")
-        log_file_path_str = "~/.config/llmchat/logs/" + log_file_name # Fallback
+        log_file_path_str = "~/.config/llmchat/logs/" + log_file_name
         log_file_path = Path(os.path.expanduser(log_file_path_str))
     except Exception as e_appdirs:
         logger.error(f"Error using appdirs to determine log path: {e_appdirs}. Falling back.")
         log_file_path_str = "~/.config/llmchat/logs/" + log_file_name
         log_file_path = Path(os.path.expanduser(log_file_path_str))
-
 
     logger.info(f"Attempting to read last {log_lines_to_fetch} lines from log file: {log_file_path}")
 
@@ -266,8 +252,7 @@ def api_logs_route() -> Any:
 
     try:
         with open(log_file_path, "r", encoding="utf-8", errors="ignore") as f:
-            lines = f.readlines() # Read all lines
-            # Get the last N lines
+            lines = f.readlines()
             log_content_lines = lines[-log_lines_to_fetch:]
             log_content = "".join(log_content_lines)
 

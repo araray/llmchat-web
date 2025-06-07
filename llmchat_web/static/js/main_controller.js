@@ -165,6 +165,12 @@ function fetchAndUpdateInitialStatus() {
         window.currentLlmSettings.providerName || "N/A",
       );
       $("#status-model").text(window.currentLlmSettings.modelName || "N/A");
+
+      // Update context usage display with data from status response
+      if (typeof updateContextUsageDisplay === "function") {
+        updateContextUsageDisplay(status.context_usage || null);
+      }
+
       if (typeof fetchAndPopulateLlmProviders === "function")
         fetchAndPopulateLlmProviders();
       if (typeof fetchAndDisplaySystemMessage === "function")
@@ -175,8 +181,6 @@ function fetchAndUpdateInitialStatus() {
         fetchAndPopulateRagCollections();
       if (typeof fetchAndDisplayPromptTemplateValues === "function")
         fetchAndDisplayPromptTemplateValues();
-      if (typeof updateContextUsageDisplay === "function")
-        updateContextUsageDisplay(null);
 
       fetchAndDisplaySessions();
 
@@ -301,7 +305,6 @@ $(document).ready(function () {
           );
         updateChatPanelState(true);
 
-        // Update global settings from the defaults sent for a new session
         if (newSessionResponse.llm_settings) {
           window.currentLlmSettings.providerName =
             newSessionResponse.llm_settings.provider_name;
@@ -310,12 +313,10 @@ $(document).ready(function () {
           window.currentLlmSettings.systemMessage =
             newSessionResponse.llm_settings.system_message;
         }
-        // ... (update RAG, prompt values etc. similarly if needed) ...
         window.stagedContextItems = [];
         if (typeof renderStagedContextItems === "function")
           renderStagedContextItems();
 
-        // **FIX**: Manually prepend the new session item to the UI
         $("#session-list .list-group-item.active").removeClass("active");
         const $newSessionItem = $("<a>", {
           href: "#",
@@ -327,7 +328,6 @@ $(document).ready(function () {
                    <small class="text-muted">Messages: 0</small>`,
         });
         $("#session-list").prepend($newSessionItem);
-        // Refresh the session list in the background to get proper names later
         setTimeout(fetchAndDisplaySessions, 2000);
       })
       .fail(function () {
@@ -348,12 +348,7 @@ $(document).ready(function () {
           return;
         }
 
-        // --- START: FIX for Step 1.4 ---
-        // Rationale: Instead of a full, destructive UI reset with fetchAndUpdateInitialStatus(),
-        // perform a targeted update of global state and UI components based on the loaded session's data.
-        // This preserves the chat message history which is rendered right after this block.
-
-        // 1. Update global state from the session's applied settings
+        // --- START: Targeted UI Update on Session Load ---
         window.currentLlmSessionId = response.session_data.id;
         const settings = response.applied_settings;
         window.currentLlmSettings = {
@@ -368,12 +363,10 @@ $(document).ready(function () {
           filter: settings.rag_filter,
         };
         window.currentPromptTemplateValues = settings.prompt_template_values;
-        window.stagedContextItems = []; // Clear staged items when loading a session
+        window.stagedContextItems = [];
 
-        // 2. Enable chat panel
         updateChatPanelState(true);
 
-        // 3. Render the chat message history
         $("#chat-messages").empty();
         if (
           response.session_data.messages &&
@@ -390,11 +383,17 @@ $(document).ready(function () {
           );
         }
 
-        // 4. Update all UI components to reflect the new global state
+        // Update all UI components to reflect the new global state
         $("#status-provider").text(
           window.currentLlmSettings.providerName || "N/A",
         );
         $("#status-model").text(window.currentLlmSettings.modelName || "N/A");
+
+        // Update context usage display with data from load response
+        if (typeof updateContextUsageDisplay === "function") {
+          updateContextUsageDisplay(response.context_usage || null);
+        }
+
         if (typeof updateRagControlsState === "function")
           updateRagControlsState();
         if (typeof fetchAndPopulateRagCollections === "function")
@@ -407,16 +406,13 @@ $(document).ready(function () {
           fetchAndDisplayPromptTemplateValues();
         if (typeof renderStagedContextItems === "function")
           renderStagedContextItems();
-        if (typeof updateContextUsageDisplay === "function")
-          updateContextUsageDisplay(null); // Reset context usage until next turn
 
-        // 5. Refresh the session list to correctly highlight the newly active session
         fetchAndDisplaySessions();
 
         console.log(
           `MAIN_CTRL: Successfully loaded session ${response.session_data.id} and updated UI.`,
         );
-        // --- END: FIX for Step 1.4 ---
+        // --- END: Targeted UI Update on Session Load ---
       })
       .fail(function () {
         showToast("Error", "Failed to load session.", "danger");
@@ -451,10 +447,7 @@ $(document).ready(function () {
                   '<div class="message-bubble agent-message">Session deleted. Please start or load a new session.</div>',
                 );
               updateChatPanelState(false);
-              // After deleting the current session, we can do a soft refresh
-              fetchAndDisplaySessions();
-              // Or a hard refresh to reset to defaults
-              // fetchAndUpdateInitialStatus();
+              fetchAndUpdateInitialStatus(); // Full refresh to reset to defaults
             } else {
               fetchAndDisplaySessions();
             }
