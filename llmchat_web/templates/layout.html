@@ -1,5 +1,6 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-bs-theme="dark">
+    <!-- The data-bs-theme attribute is added to ensure Bootstrap components default to the correct theme -->
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -12,10 +13,14 @@
             rel="stylesheet"
             href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
         />
+        <!-- The main stylesheet now has an ID for JS targeting. -->
         <link
+            id="main-theme-stylesheet"
             rel="stylesheet"
             href="{{ url_for('static', filename='css/custom.css') }}"
         />
+        <!-- This link will be dynamically updated by JavaScript to load the selected theme override file. -->
+        <link id="theme-override-stylesheet" rel="stylesheet" href="" />
         {% block head_extra %}{% endblock %}
     </head>
     <body class="d-flex flex-column h-100">
@@ -30,7 +35,6 @@
         <!-- API modules can be loaded next -->
         <script src="{{ url_for('static', filename='js/session_api.js') }}"></script>
         <!-- UI modules that provide functions should be loaded before those that call them. -->
-        <!-- Corrected Load Order: Load modules with function definitions first. -->
         <script src="{{ url_for('static', filename='js/rag_ui.js') }}"></script>
         <script src="{{ url_for('static', filename='js/llm_settings_ui.js') }}"></script>
         <script src="{{ url_for('static', filename='js/context_manager_ui.js') }}"></script>
