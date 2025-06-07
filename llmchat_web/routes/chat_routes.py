@@ -2,7 +2,8 @@
 """
 Flask routes for chat functionalities in the llmchat-web application.
 Handles sending messages, streaming responses, and related chat operations.
-Now includes emitting RAG results in the SSE stream.
+Now includes emitting RAG results in the SSE stream and handling UI-managed
+context overrides.
 """
 import asyncio
 import json
@@ -159,6 +160,24 @@ async def _stream_chat_responses_route_helper(llm_core_chat_params: Dict[str, An
 
 @chat_bp.route("", methods=["POST"])
 def api_chat_route() -> Any:
+    """
+    Handles chat messages from the user, supporting both LLMCore-managed context
+    and a direct UI-managed context override.
+
+    This route checks for `raw_prompt_workbench_content` in the payload. If present,
+    it uses this content directly to call LLMCore with the `context_override`
+    parameter. Otherwise, it follows the standard procedure of using LLMCore's
+    internal context management (history, RAG, staged items).
+
+    JSON Payload:
+        message (str): The user's message from the main chat input box.
+        session_id (Optional[str]): The active session ID.
+        stream (bool): Whether to stream the response (default: True).
+        raw_prompt_workbench_content (Optional[str]): If provided, its content is
+            used to override LLMCore's context assembly.
+        active_context_specification (Optional[List[Dict]]): Used in LLMCore-managed mode.
+        message_inclusion_map (Optional[Dict[str, bool]]): Used in LLMCore-managed mode.
+    """
     if not llmcore_instance: logger.error("/api/chat called but LLM service (llmcore_instance) is not available."); return jsonify({"error": "LLM service not available."}), 503
     data = request.json
     if not data or "message" not in data: logger.warning("/api/chat called without 'message' in JSON payload."); return jsonify({"error": "No message provided."}), 400
@@ -166,8 +185,7 @@ def api_chat_route() -> Any:
     user_message_content: str = data["message"]
     session_id_from_request: Optional[str] = data.get("session_id", get_current_web_session_id())
     stream_requested: bool = data.get("stream", True)
-    active_context_spec_from_js: List[Dict[str, Any]] = data.get('active_context_specification', [])
-    message_inclusion_map: Optional[Dict[str, bool]] = data.get('message_inclusion_map', None)
+    raw_prompt_workbench_content: Optional[str] = data.get("raw_prompt_workbench_content")
 
     if logger.isEnabledFor(logging.DEBUG):
         session_details_for_chat_route = {
@@ -177,10 +195,6 @@ def api_chat_route() -> Any:
             "flask_session_full_content_keys": list(flask_session.keys())
         }
         logger.debug(f"FLASK_SESSION_STATE_SUMMARY (Inside /api/chat for session_id_from_request: {session_id_from_request}): {session_details_for_chat_route}")
-
-    try:
-        explicitly_staged_items: List[Union[LLMCoreMessage, LLMCoreContextItem]] = async_to_sync_in_flask(_resolve_staged_items_for_core)(active_context_spec_from_js, session_id_from_request)
-    except Exception as e_resolve_ctx: logger.error(f"Error resolving context items for chat session {session_id_from_request}: {e_resolve_ctx}", exc_info=True); return jsonify({"error": f"Failed to process context items: {str(e_resolve_ctx)}"}), 500
 
     provider_name = flask_session.get('current_provider_name')
     model_name = flask_session.get('current_model_name')
@@ -204,26 +218,73 @@ def api_chat_route() -> Any:
 
     flask_session.modified = True
 
-    logger.info(
-        f"Chat request for session '{session_id_from_request}'. Message: '{user_message_content[:50]}...'. "
-        f"Provider: {provider_name}, Model: {model_name}. "
-        f"RAG: {flask_session.get('rag_enabled', False)}, Collection: {flask_session.get('rag_collection_name')}, K: {flask_session.get('rag_k_value')}, Filter: {flask_session.get('rag_filter')}. "
-        f"SystemMsg: '{str(flask_session.get('system_message', ''))[:50]}...'. "
-        f"PromptValues: {flask_session.get('prompt_template_values', {})}. "
-        f"Staged items: {len(explicitly_staged_items)}. Stream: {stream_requested}. "
-        f"MessageInclusionMap: {'Present' if message_inclusion_map else 'Not Present'}"
-    )
+    llm_core_params: Dict[str, Any]
 
-    llm_core_params: Dict[str, Any] = {
-        "message": user_message_content, "session_id": session_id_from_request,
-        "provider_name": provider_name, "model_name": model_name,
-        "system_message": flask_session.get('system_message'), "save_session": True,
-        "enable_rag": flask_session.get('rag_enabled', False), "rag_collection_name": flask_session.get('rag_collection_name'),
-        "rag_retrieval_k": flask_session.get('rag_k_value'), "rag_metadata_filter": flask_session.get('rag_filter'),
-        "prompt_template_values": flask_session.get('prompt_template_values', {}),
-        "explicitly_staged_items": explicitly_staged_items, "stream": stream_requested,
-        "message_inclusion_map": message_inclusion_map
-    }
+    if raw_prompt_workbench_content is not None:
+        # --- Rationale Block: FEAT-03 - Direct Context Override ---
+        # Pre-state: The route always constructed chat parameters for LLMCore's default
+        #            context management (history, RAG, staging).
+        # Limitation: This did not allow for a "UI Managed" mode where the user
+        #             crafts the entire prompt payload directly.
+        # Decision Path: Following spec FEAT-03, when `raw_prompt_workbench_content` is received,
+        #                we bypass the standard context-building parameters (RAG, staging, etc.).
+        #                Instead, we construct a `context_override` list containing a single
+        #                user message with the raw content from the prompt workbench. This payload
+        #                is then passed to `llmcore.chat`, which will use it directly, bypassing
+        #                its own `ContextManager`. The original `message` from the chat input
+        #                is still passed to `llmcore.chat` to ensure the user's turn is correctly
+        #                recorded in the session history.
+        # Post-state: The route now supports a UI-managed context mode, enabling expert-level
+        #             prompt engineering from the web interface.
+        logger.info(f"Chat request for session '{session_id_from_request}' in UI_MANAGED mode.")
+
+        context_override_payload = [
+            LLMCoreMessage(
+                role=LLMCoreRole.USER,
+                content=raw_prompt_workbench_content,
+                session_id=session_id_from_request if session_id_from_request else "stateless_override"
+            )
+        ]
+
+        llm_core_params = {
+            "message": user_message_content, # Still pass for history saving
+            "session_id": session_id_from_request,
+            "provider_name": provider_name,
+            "model_name": model_name,
+            "stream": stream_requested,
+            "save_session": True, # Always save UI Managed turn to history
+            "context_override": context_override_payload,
+        }
+    else:
+        # LLMCORE_MANAGED mode (existing logic)
+        logger.info(f"Chat request for session '{session_id_from_request}' in LLMCORE_MANAGED mode.")
+        message_inclusion_map: Optional[Dict[str, bool]] = data.get('message_inclusion_map', None)
+        active_context_spec_from_js: List[Dict[str, Any]] = data.get('active_context_specification', [])
+        try:
+            explicitly_staged_items = async_to_sync_in_flask(_resolve_staged_items_for_core)(active_context_spec_from_js, session_id_from_request)
+        except Exception as e_resolve_ctx:
+            logger.error(f"Error resolving context items for chat session {session_id_from_request}: {e_resolve_ctx}", exc_info=True)
+            return jsonify({"error": f"Failed to process context items: {str(e_resolve_ctx)}"}), 500
+
+        llm_core_params = {
+            "message": user_message_content, "session_id": session_id_from_request,
+            "provider_name": provider_name, "model_name": model_name,
+            "system_message": flask_session.get('system_message'), "save_session": True,
+            "enable_rag": flask_session.get('rag_enabled', False),
+            "rag_collection_name": flask_session.get('rag_collection_name'),
+            "rag_retrieval_k": flask_session.get('rag_k_value'),
+            "rag_metadata_filter": flask_session.get('rag_filter'),
+            "prompt_template_values": flask_session.get('prompt_template_values', {}),
+            "explicitly_staged_items": explicitly_staged_items,
+            "stream": stream_requested,
+            "message_inclusion_map": message_inclusion_map,
+        }
+
+    logger.info(
+        f"Dispatching to LLMCore.chat. Message: '{llm_core_params.get('message', '')[:50]}...'. "
+        f"Provider: {provider_name}, Model: {model_name}. "
+        f"UI_Managed: {raw_prompt_workbench_content is not None}. Stream: {stream_requested}."
+    )
 
     if stream_requested:
         llm_core_params["stream"] = True
