@@ -318,6 +318,18 @@ $(document).ready(function () {
     console.log("MAIN_CTRL: New session button clicked.");
     apiCreateNewSession() // from session_api.js
       .done(function (newSessionResponse) {
+        // --- Rationale Block: UX-01 Fix ---
+        // Pre-state: After creating a new session, the UI called `fetchAndDisplaySessions()`.
+        //            Since the new session isn't persistent until the first message, it wouldn't
+        //            appear in the list, making the UI feel unresponsive.
+        // Limitation: The user had no immediate visual confirmation that a new session context was active.
+        // Decision Path: Instead of refreshing the entire list from the backend, we now manually
+        //                prepend a temporary "New Session" item to the top of the list and mark it as active.
+        //                The full list refresh will happen naturally after the first message makes the
+        //                session persistent or when the page is reloaded.
+        // Post-state: Clicking "New Session" provides immediate, responsive feedback by adding the
+        //             new session to the UI list instantly.
+        // --- End Rationale Block ---
         console.log(
           "MAIN_CTRL: New session context created by API:",
           newSessionResponse,
@@ -328,6 +340,23 @@ $(document).ready(function () {
           .append(
             '<div class="message-bubble agent-message">New session started.</div>',
           );
+
+        // Deactivate any currently active session in the UI
+        $("#session-list .list-group-item.active").removeClass("active");
+
+        // Manually prepend the new, temporary session to the list UI
+        const newSessionId = newSessionResponse.id;
+        const $newSessionItem = $("<a>", {
+          href: "#",
+          class: "list-group-item list-group-item-action active", // Mark as active
+          "data-session-id": newSessionId,
+          html: `<div class="d-flex w-100 justify-content-between">
+                       <h6 class="mb-1 text-primary"><em>New Session...</em></h6>
+                       <small class="text-muted">Just now</small>
+                   </div>
+                   <small class="text-muted">Messages: 0</small>`,
+        });
+        $("#session-list").prepend($newSessionItem);
 
         // Update global state and UI from newSessionResponse which contains *default* settings
         if (
@@ -367,7 +396,9 @@ $(document).ready(function () {
         window.currentPromptTemplateValues =
           newSessionResponse.prompt_template_values || {};
 
-        fetchAndDisplaySessions(); // Refresh session list, highlighting new (temporary) session
+        // DO NOT call fetchAndDisplaySessions(); it would wipe the prepended item.
+        // The list will refresh on next full load or after a persistent action.
+
         if (typeof updateRagControlsState === "function")
           updateRagControlsState();
         if (typeof fetchAndPopulateLlmProviders === "function")
