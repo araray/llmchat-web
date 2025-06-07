@@ -297,6 +297,7 @@ async def preview_context_route(session_id: str) -> Any:
     Previews the full context that LLMCore would prepare for a chat interaction.
     This includes message history, RAG documents (if enabled), and explicitly staged items.
     Uses settings from the current Flask session (RAG, LLM provider/model, system message).
+    This handler now enriches the response with the provider and model names.
 
     Expects JSON payload:
     {
@@ -320,14 +321,18 @@ async def preview_context_route(session_id: str) -> Any:
         explicitly_staged_items_for_core: List[Union[Any, Any]] = \
             await _resolve_staged_items_for_core(staged_items_from_js, session_id)
 
+        # Retrieve provider and model from session to pass to core and to enrich response
+        provider_name = flask_session.get('current_provider_name')
+        model_name = flask_session.get('current_model_name')
+
         # Call LLMCore's preview method
         preview_details_dict = await llmcore_instance.preview_context_for_chat(
             current_user_query=current_query_for_preview or "", # Must be a string
             session_id=session_id,
             # Get LLM and RAG settings from Flask session
             system_message=flask_session.get('system_message'),
-            provider_name=flask_session.get('current_provider_name'),
-            model_name=flask_session.get('current_model_name'),
+            provider_name=provider_name,
+            model_name=model_name,
             explicitly_staged_items=explicitly_staged_items_for_core, # type: ignore
             enable_rag=flask_session.get('rag_enabled', False),
             rag_collection_name=flask_session.get('rag_collection_name'),
@@ -335,7 +340,17 @@ async def preview_context_route(session_id: str) -> Any:
             rag_metadata_filter=flask_session.get('rag_filter'), # dict or None
             prompt_template_values=flask_session.get('prompt_template_values', {})
         )
-        # preview_context_for_chat returns a Pydantic model, which .model_dump()s to dict
+
+        # --- FIX: Enrich the response dictionary ---
+        # Rationale: The `ContextPreparationDetails` model from llmcore does not
+        # include provider_name or model_name. The frontend needs this information
+        # to render the preview modal correctly. This route handler has access to
+        # these values from the Flask session, so we add them to the dictionary
+        # before sending it as a JSON response.
+        preview_details_dict['provider_name'] = provider_name
+        preview_details_dict['model_name'] = model_name
+        # --- END FIX ---
+
         logger.info(f"Successfully generated context preview for session {session_id}.")
         return jsonify(preview_details_dict) # Already a dict from model_dump
     except SessionNotFoundError:
