@@ -4,7 +4,8 @@
  * @file main_controller.js
  * @description Main JavaScript controller for the llmchat-web interface.
  * This file initializes various UI modules and handles global state management,
- * initial status fetching, session list display, log display, and remaining top-level UI interactions.
+ * initial status fetching, session list display, and other top-level UI interactions.
+ * This version adds theme management functionality.
  *
  * Global state variables (e.g., window.currentLlmSettings) are initialized in utils.js.
  * This script populates them based on backend status and user interactions.
@@ -27,6 +28,75 @@
 // window.currentRagSettings, window.currentLlmSettings, window.currentPromptTemplateValues)
 // are DECLARED and INITIALIZED in utils.js to ensure they exist before any other script runs.
 // This script (main_controller.js) will POPULATE these global variables.
+
+// =================================================================================
+// SECTION: Theme Management
+// =================================================================================
+
+/**
+ * Applies the selected theme by updating the override stylesheet and HTML attributes.
+ * Also saves the preference to localStorage.
+ * @param {string} themeName - The name of the theme to apply ('light' or 'dark').
+ */
+function applyTheme(themeName) {
+  console.log(`MAIN_CTRL: Applying theme: ${themeName}`);
+  const themeOverrideSheet = $("#theme-override-stylesheet");
+  const htmlElement = $("html");
+
+  if (themeName === "light") {
+    // Load the light theme's CSS file to override the default (dark) variables
+    const lightThemeUrl = themeOverrideSheet
+      .data("base-url")
+      .replace("placeholder", "light.css");
+    themeOverrideSheet.attr("href", "/static/css/themes/light.css");
+    htmlElement.attr("data-bs-theme", "light");
+  } else {
+    // For the dark theme, we just remove the override sheet,
+    // allowing custom.css (the default dark theme) to take effect.
+    themeOverrideSheet.attr("href", "");
+    htmlElement.attr("data-bs-theme", "dark");
+  }
+  // Persist the user's choice
+  try {
+    localStorage.setItem("llmchat_theme", themeName);
+    console.log(
+      `MAIN_CTRL: Theme preference '${themeName}' saved to localStorage.`,
+    );
+  } catch (e) {
+    console.warn(
+      "MAIN_CTRL: Could not save theme preference to localStorage.",
+      e,
+    );
+  }
+}
+
+/**
+ * Initializes the theme based on the user's saved preference in localStorage,
+ * or defaults to dark.
+ */
+function initializeTheme() {
+  let preferredTheme = null;
+  try {
+    preferredTheme = localStorage.getItem("llmchat_theme");
+  } catch (e) {
+    console.warn(
+      "MAIN_CTRL: Could not read theme preference from localStorage.",
+      e,
+    );
+  }
+
+  if (preferredTheme) {
+    console.log(
+      `MAIN_CTRL: Found saved theme in localStorage: ${preferredTheme}.`,
+    );
+    applyTheme(preferredTheme);
+  } else {
+    console.log(
+      "MAIN_CTRL: No theme saved in localStorage. Defaulting to dark theme.",
+    );
+    applyTheme("dark"); // Default to dark if nothing is set
+  }
+}
 
 /**
  * Fetches initial status from the backend and updates the UI and global state.
@@ -156,13 +226,13 @@ function fetchAndUpdateInitialStatus() {
         $("#chat-messages")
           .empty()
           .append(
-            '&lt;div class="message-bubble agent-message"&gt;No active session. Create or load one.&lt;/div&gt;',
+            '<div class="message-bubble agent-message">No active session. Create or load one.</div>',
           );
         $("#workspace-items-list").html(
-          '&lt;p class="text-muted p-2"&gt;No active session to load workspace items from.&lt;/p&gt;',
+          '<p class="text-muted p-2">No active session to load workspace items from.</p>',
         );
         $("#active-context-spec-list").html(
-          '&lt;p class="text-muted p-2"&gt;No active session for context items.&lt;/p&gt;',
+          '<p class="text-muted p-2">No active session for context items.</p>',
         );
         window.stagedContextItems = []; // Clear staged items for new/no session
         if (typeof renderStagedContextItems === "function")
@@ -211,15 +281,15 @@ function fetchAndDisplaySessions() {
       const $sessionList = $("#session-list").empty();
       if (sessions && sessions.length > 0) {
         sessions.forEach(function (session) {
-          const $sessionItem = $("&lt;a&gt;", {
+          const $sessionItem = $("<a>", {
             href: "#",
             class: "list-group-item list-group-item-action",
             "data-session-id": session.id,
-            html: `&lt;div class="d-flex w-100 justify-content-between"&gt;
-                                   &lt;h6 class="mb-1"&gt;${escapeHtml(session.name) || escapeHtml(session.id.substring(0, 15)) + "..."}&lt;/h6&gt;
-                                   &lt;small class="text-muted"&gt;${new Date(session.updated_at).toLocaleString()}&lt;/small&gt;
-                               &lt;/div&gt;
-                               &lt;small class="text-muted"&gt;Messages: ${session.message_count || 0}&lt;/small&gt;`,
+            html: `<div class="d-flex w-100 justify-content-between">
+                                   <h6 class="mb-1">${escapeHtml(session.name) || escapeHtml(session.id.substring(0, 15)) + "..."}</h6>
+                                   <small class="text-muted">${new Date(session.updated_at).toLocaleString()}</small>
+                               </div>
+                               <small class="text-muted">Messages: ${session.message_count || 0}</small>`,
           });
           if (session.id === window.currentLlmSessionId) {
             $sessionItem.addClass("active");
@@ -233,7 +303,7 @@ function fetchAndDisplaySessions() {
         }
       } else {
         $sessionList.append(
-          '&lt;p class="text-muted small m-2"&gt;No saved sessions found.&lt;/p&gt;',
+          '<p class="text-muted small m-2">No saved sessions found.</p>',
         );
         $("#btn-delete-session").prop("disabled", true);
       }
@@ -245,7 +315,7 @@ function fetchAndDisplaySessions() {
         errorThrown,
       );
       $("#session-list").html(
-        '&lt;p class="text-danger small m-2"&gt;Error loading sessions.&lt;/p&gt;',
+        '<p class="text-danger small m-2">Error loading sessions.</p>',
       );
       $("#btn-delete-session").prop("disabled", true);
     });
@@ -295,10 +365,12 @@ function fetchAndDisplayAppLogs() {
 $(document).ready(function () {
   console.log("MAIN_CTRL: Document ready. Initializing application...");
 
+  initializeTheme(); // Apply saved theme on page load
+
   if ($("#toast-container").length === 0) {
     // Ensure toast container exists
     $("body").append(
-      '&lt;div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1056"&gt;&lt;/div&gt;',
+      '<div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1056"></div>',
     );
   }
 
@@ -315,6 +387,13 @@ $(document).ready(function () {
     initPromptTemplateEventListeners();
   if (typeof initIngestionEventListeners === "function")
     initIngestionEventListeners();
+
+  // --- Theme Switcher Event Listener ---
+  $(".dropdown-menu a[data-theme]").on("click", function (e) {
+    e.preventDefault();
+    const selectedTheme = $(this).data("theme");
+    applyTheme(selectedTheme);
+  });
 
   // --- New Session Button ---
   $("#btn-new-session").on("click", function () {
@@ -341,7 +420,7 @@ $(document).ready(function () {
         $("#chat-messages")
           .empty()
           .append(
-            '&lt;div class="message-bubble agent-message"&gt;New session started.&lt;/div&gt;',
+            '<div class="message-bubble agent-message">New session started.</div>',
           );
 
         // Deactivate any currently active session in the UI
@@ -349,15 +428,15 @@ $(document).ready(function () {
 
         // Manually prepend the new, temporary session to the list UI
         const newSessionId = newSessionResponse.id;
-        const $newSessionItem = $("&lt;a&gt;", {
+        const $newSessionItem = $("<a>", {
           href: "#",
           class: "list-group-item list-group-item-action active", // Mark as active
           "data-session-id": newSessionId,
-          html: `&lt;div class="d-flex w-100 justify-content-between"&gt;
-                       &lt;h6 class="mb-1 text-primary"&gt;&lt;em&gt;New Session...&lt;/em&gt;&lt;/h6&gt;
-                       &lt;small class="text-muted"&gt;Just now&lt;/small&gt;
-                   &lt;/div&gt;
-                   &lt;small class="text-muted"&gt;Messages: 0&lt;/small&gt;`,
+          html: `<div class="d-flex w-100 justify-content-between">
+                       <h6 class="mb-1 text-primary"><em>New Session...</em></h6>
+                       <small class="text-muted">Just now</small>
+                   </div>
+                   <small class="text-muted">Messages: 0</small>`,
         });
         $("#session-list").prepend($newSessionItem);
 
@@ -473,7 +552,7 @@ $(document).ready(function () {
           });
         } else {
           $("#chat-messages").append(
-            '&lt;div class="message-bubble agent-message"&gt;Session loaded. No messages yet.&lt;/div&gt;',
+            '<div class="message-bubble agent-message">Session loaded. No messages yet.</div>',
           );
         }
 
@@ -644,7 +723,7 @@ $(document).ready(function () {
         console.log("MAIN_CTRL: REPL command to send:", commandText);
         $("#repl-command-output").prepend(
           // Add to top
-          `&lt;div class="text-info"&gt;&lt;i class="fas fa-angle-right"&gt;&lt;/i&gt; ${escapeHtml(commandText)}&lt;/div&gt;`,
+          `<div class="text-info"><i class="fas fa-angle-right"></i> ${escapeHtml(commandText)}</div>`,
         );
         $(this).val(""); // Clear input
         $.ajax({
@@ -655,14 +734,14 @@ $(document).ready(function () {
           dataType: "json",
           success: function (response) {
             console.log("MAIN_CTRL: REPL command response:", response);
-            let outputHtml = `&lt;div class="${response.status === "error" ? "text-danger" : response.status === "executed" ? "text-success" : "text-white-50"}"&gt;`;
+            let outputHtml = `<div class="${response.status === "error" ? "text-danger" : response.status === "executed" ? "text-success" : "text-white-50"}">`;
             if (response.output)
-              outputHtml += `&lt;i class="fas fa-check-circle"&gt;&lt;/i&gt; ${escapeHtml(response.output)}`;
+              outputHtml += `<i class="fas fa-check-circle"></i> ${escapeHtml(response.output)}`;
             else if (response.command_received)
-              outputHtml += `&lt;i class="fas fa-check-circle"&gt;&lt;/i&gt; Command '${escapeHtml(response.command_received)}' acknowledged. Status: ${escapeHtml(response.status || "unknown")}`;
+              outputHtml += `<i class="fas fa-check-circle"></i> Command '${escapeHtml(response.command_received)}' acknowledged. Status: ${escapeHtml(response.status || "unknown")}`;
             else
-              outputHtml += `&lt;i class="fas fa-info-circle"&gt;&lt;/i&gt; Empty response from server.`;
-            outputHtml += `&lt;/div&gt;`;
+              outputHtml += `<i class="fas fa-info-circle"></i> Empty response from server.`;
+            outputHtml += `</div>`;
             $("#repl-command-output").prepend(outputHtml);
             // Limit number of output lines in REPL
             const maxReplLines = 50;
@@ -680,7 +759,7 @@ $(document).ready(function () {
               ? jqXHR.responseJSON.error
               : "Failed to send command.";
             $("#repl-command-output").prepend(
-              `&lt;div class="text-danger"&gt;&lt;i class="fas fa-exclamation-triangle"&gt;&lt;/i&gt; Error: ${escapeHtml(errorMsg)}&lt;/div&gt;`,
+              `<div class="text-danger"><i class="fas fa-exclamation-triangle"></i> Error: ${escapeHtml(errorMsg)}</div>`,
             );
           },
         });
