@@ -2,6 +2,7 @@
 """
 Flask routes for chat functionalities in the llmchat-web application.
 Handles sending messages, streaming responses, and related chat operations.
+Now includes emitting RAG results in the SSE stream.
 """
 import asyncio
 import json
@@ -38,6 +39,7 @@ if not logger.handlers and app_logger:
         logger.setLevel(app_logger.level if app_logger else logging.DEBUG)
 
 async def _get_last_assistant_message_id(session_id: Optional[str]) -> Optional[str]:
+    """Helper to get the ID of the last assistant message in a session."""
     if not llmcore_instance or not session_id:
         logger.warning(f"_get_last_assistant_message_id called with no llmcore_instance or session_id ({session_id})")
         return None
@@ -88,15 +90,6 @@ async def _resolve_staged_items_for_core(
                 resolved_item = await llmcore_instance.get_context_item(session_id_for_staging, item_id_ref)
                 if resolved_item: logger.debug(f"Resolved staged workspace_item: {item_id_ref}")
             elif item_type_str == "file_content" and item_path:
-                # --- Rationale Block: BUG-01 Fix ---
-                # Pre-state: This block incorrectly used `item_content` (which is null for files)
-                #            instead of reading the file from `item_path`.
-                # Limitation: This caused staged files to have no content, making them useless in the LLM prompt.
-                # Decision Path: The fix is to use `pathlib` to safely handle the server-side path
-                #                and `read_text()` to load the file's content into the ContextItem.
-                # Post-state: The function now correctly reads the file content, ensuring staged files
-                #             are properly included in the context sent to llmcore.
-                # --- End Rationale Block ---
                 file_path_obj = Path(item_path).expanduser()
                 if file_path_obj.is_file():
                     file_content_from_path = file_path_obj.read_text(encoding='utf-8', errors='ignore')
@@ -114,24 +107,55 @@ async def _resolve_staged_items_for_core(
     return explicitly_staged_items
 
 async def _stream_chat_responses_route_helper(llm_core_chat_params: Dict[str, Any]) -> AsyncGenerator[str, None]:
+    """
+    Async generator for streaming chat responses.
+    This encapsulates the LLMCore call and SSE formatting, including now
+    emitting a `rag_results` event after the chat stream completes if RAG was used.
+    """
     if not llmcore_instance:
         logger.error("LLMCore instance not available for streaming chat.")
         yield f"data: {json.dumps({'type': 'error', 'error': 'LLM service not available.'})}\n\n"; yield f"data: {json.dumps({'type': 'end'})}\n\n"; return
-    last_assistant_message_id: Optional[str] = None; context_usage_data: Optional[Dict[str, Any]] = None
+
     session_id_for_meta = llm_core_chat_params.get("session_id")
     logger.debug(f"Starting chat stream for session {session_id_for_meta} with params: {str(llm_core_chat_params.get('message'))[:50]}...")
     try:
         response_generator = await llmcore_instance.chat(**llm_core_chat_params)
-        async for chunk_content in response_generator: yield f"data: {json.dumps({'type': 'chunk', 'content': chunk_content})}\n\n"; await asyncio.sleep(0.01)
-        logger.debug(f"Chat stream completed for session {session_id_for_meta}. Fetching metadata.")
+        async for chunk_content in response_generator:
+            yield f"data: {json.dumps({'type': 'chunk', 'content': chunk_content})}\n\n"
+            await asyncio.sleep(0.01)
+
+        logger.debug(f"Chat stream completed for session {session_id_for_meta}. Fetching post-stream metadata.")
+
         if session_id_for_meta:
+            # New: Fetch RAG results from LLMCore's transient cache
+            context_details = await llmcore_instance.get_last_interaction_context_info(session_id_for_meta)
+            if context_details and context_details.rag_documents_used:
+                rag_docs_payload = [doc.model_dump(mode="json") for doc in context_details.rag_documents_used]
+                yield f"data: {json.dumps({'type': 'rag_results', 'documents': rag_docs_payload})}\n\n"
+                logger.info(f"Yielded {len(rag_docs_payload)} RAG results for session {session_id_for_meta}.")
+
+            # Existing logic for other metadata
             last_assistant_message_id = await _get_last_assistant_message_id(session_id_for_meta)
             context_usage_data = await get_context_usage_info(session_id_for_meta)
-        if last_assistant_message_id: logger.debug(f"Yielding full_response_id: {last_assistant_message_id} for session {session_id_for_meta}"); yield f"data: {json.dumps({'type': 'full_response_id', 'message_id': last_assistant_message_id})}\n\n"
-        if context_usage_data: logger.debug(f"Yielding context_usage data for session {session_id_for_meta}: {context_usage_data}"); yield f"data: {json.dumps({'type': 'context_usage', 'data': context_usage_data})}\n\n"
-    except (ProviderError, ContextLengthError, SessionNotFoundError, LLMCoreError) as e: logger.error(f"LLMCore chat error during stream for session {session_id_for_meta}: {e}", exc_info=True); yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
-    except Exception as e: logger.error(f"Unexpected error during chat stream for session {session_id_for_meta}: {e}", exc_info=True); yield f"data: {json.dumps({'type': 'error', 'error': 'An unexpected server error occurred during chat.'})}\n\n"
-    finally: logger.info(f"Ending chat stream for session {session_id_for_meta}."); yield f"data: {json.dumps({'type': 'end'})}\n\n"
+
+            if last_assistant_message_id:
+                logger.debug(f"Yielding full_response_id: {last_assistant_message_id} for session {session_id_for_meta}")
+                yield f"data: {json.dumps({'type': 'full_response_id', 'message_id': last_assistant_message_id})}\n\n"
+
+            if context_usage_data:
+                logger.debug(f"Yielding context_usage data for session {session_id_for_meta}: {context_usage_data}")
+                yield f"data: {json.dumps({'type': 'context_usage', 'data': context_usage_data})}\n\n"
+
+    except (ProviderError, ContextLengthError, SessionNotFoundError, LLMCoreError) as e:
+        logger.error(f"LLMCore chat error during stream for session {session_id_for_meta}: {e}", exc_info=True)
+        yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+    except Exception as e:
+        logger.error(f"Unexpected error during chat stream for session {session_id_for_meta}: {e}", exc_info=True)
+        yield f"data: {json.dumps({'type': 'error', 'error': 'An unexpected server error occurred during chat.'})}\n\n"
+    finally:
+        logger.info(f"Ending chat stream for session {session_id_for_meta}.")
+        yield f"data: {json.dumps({'type': 'end'})}\n\n"
+
 
 @chat_bp.route("", methods=["POST"])
 def api_chat_route() -> Any:
@@ -145,7 +169,6 @@ def api_chat_route() -> Any:
     active_context_spec_from_js: List[Dict[str, Any]] = data.get('active_context_specification', [])
     message_inclusion_map: Optional[Dict[str, bool]] = data.get('message_inclusion_map', None)
 
-    # --- Log Flask session state at the beginning of chat request handling ---
     if logger.isEnabledFor(logging.DEBUG):
         session_details_for_chat_route = {
             "current_llm_session_id_in_flask": flask_session.get('current_llm_session_id'),
@@ -154,7 +177,6 @@ def api_chat_route() -> Any:
             "flask_session_full_content_keys": list(flask_session.keys())
         }
         logger.debug(f"FLASK_SESSION_STATE_SUMMARY (Inside /api/chat for session_id_from_request: {session_id_from_request}): {session_details_for_chat_route}")
-    # --- End Flask session logging ---
 
     try:
         explicitly_staged_items: List[Union[LLMCoreMessage, LLMCoreContextItem]] = async_to_sync_in_flask(_resolve_staged_items_for_core)(active_context_spec_from_js, session_id_from_request)
@@ -180,7 +202,7 @@ def api_chat_route() -> Any:
             model_name = default_model; flask_session['current_model_name'] = model_name
         else: logger.warning(f"Chat route: 'current_model_name' is None for provider '{provider_name}', and no default model found in config.")
 
-    flask_session.modified = True # Ensure session is saved if changes were made
+    flask_session.modified = True
 
     logger.info(
         f"Chat request for session '{session_id_from_request}'. Message: '{user_message_content[:50]}...'. "
