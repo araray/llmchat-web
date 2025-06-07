@@ -4,8 +4,9 @@
  * @file rag_ui.js
  * @description Handles RAG (Retrieval Augmented Generation) UI controls,
  * API calls for RAG settings, collections, direct search, and rendering results.
+ * Now includes the function to display RAG results from a chat SSE stream.
  * Depends on utils.js for helper functions (escapeHtml, showToast) and
- * accesses global variables from custom.js (currentRagSettings).
+ * accesses global variables from main_controller.js (currentRagSettings, currentLlmSessionId).
  */
 
 /**
@@ -16,7 +17,7 @@
 function fetchAndPopulateRagCollections() {
   console.log("RAG_UI: Fetching RAG collections...");
   $.ajax({
-    url: "/api/rag/collections", // Correct endpoint
+    url: "/api/rag/collections",
     type: "GET",
     dataType: "json",
     success: function (collections) {
@@ -26,23 +27,21 @@ function fetchAndPopulateRagCollections() {
         .append('<option selected value="">Select Collection...</option>');
       if (collections && collections.length > 0) {
         collections.forEach(function (collection) {
-          // Assuming collection can be a string or an object with name/id
           const collectionName =
             typeof collection === "string"
               ? collection
-              : collection.name || collection.id; // Prefer name, fallback to id
+              : collection.name || collection.id;
           const collectionValue =
             typeof collection === "string"
               ? collection
-              : collection.id || collection.name; // Prefer id if available, else name
+              : collection.id || collection.name;
           $select.append(
             $("<option>", {
               value: collectionValue,
-              text: escapeHtml(collectionName), // escapeHtml from utils.js
+              text: escapeHtml(collectionName),
             }),
           );
         });
-        // Ensure currentRagSettings and its properties are checked before use
         if (
           window.currentRagSettings &&
           window.currentRagSettings.collectionName
@@ -78,7 +77,6 @@ function fetchAndPopulateRagCollections() {
  * Uses global `escapeHtml`.
  */
 function updateRagControlsState() {
-  // Ensure currentRagSettings exists before accessing its properties
   const ragSettings = window.currentRagSettings || {};
   const isEnabled = ragSettings.enabled || false;
   const collectionName = ragSettings.collectionName || null;
@@ -90,7 +88,6 @@ function updateRagControlsState() {
 
   $("#rag-collection-select").prop("disabled", controlsShouldBeDisabled);
   if (collectionName) {
-    // Only set value if a collection name is actually stored
     $("#rag-collection-select").val(collectionName);
   }
 
@@ -122,12 +119,10 @@ function updateRagControlsState() {
  * Uses global `showToast`.
  */
 function sendRagSettingsUpdate() {
-  // Ensure currentRagSettings exists before use
   const ragSettings = window.currentRagSettings || {};
   console.log("RAG_UI: Sending RAG settings update to backend:", ragSettings);
 
   let filterToSend = ragSettings.filter;
-  // If filter is an empty string from input, treat as null. If it's already null/obj, pass as is.
   if (typeof filterToSend === "string" && filterToSend.trim() === "") {
     filterToSend = null;
   }
@@ -136,11 +131,11 @@ function sendRagSettingsUpdate() {
     enabled: ragSettings.enabled || false,
     collectionName: ragSettings.collectionName || null,
     kValue: ragSettings.kValue || 3,
-    filter: filterToSend, // This will be null or an object
+    filter: filterToSend,
   };
 
   $.ajax({
-    url: "/api/rag/settings/update", // Corrected URL
+    url: "/api/rag/settings/update",
     type: "POST",
     contentType: "application/json",
     data: JSON.stringify(payload),
@@ -151,14 +146,10 @@ function sendRagSettingsUpdate() {
         response,
       );
       if (response && response.rag_settings) {
-        // Ensure window.currentRagSettings is initialized if it was undefined
         if (
           typeof window.currentRagSettings === "undefined" ||
           window.currentRagSettings === null
         ) {
-          console.warn(
-            "RAG_UI: window.currentRagSettings was undefined/null in AJAX success. Re-initializing.",
-          );
           window.currentRagSettings = {
             enabled: false,
             collectionName: null,
@@ -166,20 +157,13 @@ function sendRagSettingsUpdate() {
             filter: null,
           };
         }
-        // Update the global currentRagSettings
         window.currentRagSettings.enabled = response.rag_settings.enabled;
         window.currentRagSettings.collectionName =
           response.rag_settings.collection_name;
         window.currentRagSettings.kValue = response.rag_settings.k_value;
-        // Backend now sends filter as object or null.
         window.currentRagSettings.filter = response.rag_settings.filter;
-
-        console.log(
-          "RAG_UI: Global currentRagSettings updated:",
-          window.currentRagSettings,
-        );
       }
-      updateRagControlsState(); // Re-render controls based on (potentially updated) global state
+      updateRagControlsState();
     },
     error: function (jqXHR, textStatus, errorThrown) {
       console.error(
@@ -198,9 +182,8 @@ function sendRagSettingsUpdate() {
 }
 
 /**
- * Renders the results of a Direct RAG Search into the modal.
- * Uses global `escapeHtml`.
- * @param {Array} results - Array of document objects from the backend.
+ * Renders the results of a Direct RAG Search into the search results modal.
+ * @param {Array<Object>} results - Array of document objects from the backend.
  */
 function renderDirectRagSearchResults(results) {
   const $modalBody = $("#directRagSearchResultsBody").empty();
@@ -210,7 +193,6 @@ function renderDirectRagSearchResults(results) {
     );
     return;
   }
-
   const $listGroup = $('<ul class="list-group list-group-flush"></ul>');
   results.forEach(function (doc) {
     const scoreDisplay =
@@ -240,9 +222,57 @@ function renderDirectRagSearchResults(results) {
 }
 
 /**
+ * Renders the RAG documents used for a chat response into the main RAG tab.
+ * This is the display function for the RAG Content Inspector.
+ * @param {Array<Object>} documents - Array of document objects from the SSE stream.
+ */
+function displayRetrievedDocuments(documents) {
+  const $displayArea = $("#rag-retrieved-docs-display"); // This element will be added to index.html
+  $displayArea.empty().removeClass("d-none"); // Clear previous results and ensure it's visible
+
+  if (!documents || documents.length === 0) {
+    $displayArea.html(
+      '<p class="text-muted small">No documents were retrieved by RAG for the last response.</p>',
+    );
+    return;
+  }
+
+  console.log(`RAG_UI: Displaying ${documents.length} retrieved documents.`);
+  const $listGroup = $('<div class="list-group"></div>');
+  documents.forEach(function (doc) {
+    const scoreDisplay =
+      doc.score !== null
+        ? `<span class="badge bg-info float-end">Score: ${doc.score.toFixed(3)}</span>`
+        : "";
+    const metadataDisplay = doc.metadata
+      ? `<small class="text-muted d-block">Source: ${escapeHtml(JSON.stringify(doc.metadata.source || doc.id))}</small>`
+      : "";
+    const contentPreview = doc.content
+      ? `<p class="mb-1 small">${escapeHtml(doc.content.substring(0, 300))}...</p>`
+      : "";
+
+    const $item = $(`
+            <div class="list-group-item list-group-item-action flex-column align-items-start">
+                <div class="d-flex w-100 justify-content-between">
+                    <h6 class="mb-1">ID: ${escapeHtml(doc.id)}</h6>
+                    ${scoreDisplay}
+                </div>
+                ${contentPreview}
+                ${metadataDisplay}
+                <div class="rag-doc-actions mt-2">
+                    <button class="btn btn-sm btn-outline-secondary btn-add-rag-doc-to-workspace" data-doc-id="${escapeHtml(doc.id)}" title="Add to Workspace">
+                        <i class="fas fa-plus-square"></i> Add to Workspace
+                    </button>
+                </div>
+            </div>
+        `);
+    $listGroup.append($item);
+  });
+  $displayArea.append($listGroup);
+}
+
+/**
  * Handles the submission of the Direct RAG Search form.
- * Relies on global `currentRagSettings`, `showToast`, `escapeHtml`.
- * Calls `renderDirectRagSearchResults`.
  */
 function handleDirectRagSearch() {
   const query = $("#direct-rag-search-query").val().trim();
@@ -254,7 +284,6 @@ function handleDirectRagSearch() {
     );
     return;
   }
-  // Use global currentRagSettings from custom.js or default if undefined
   const ragSettingsToUse = window.currentRagSettings || {
     collectionName: null,
     kValue: 3,
@@ -278,7 +307,7 @@ function handleDirectRagSearch() {
   searchModal.show();
 
   $.ajax({
-    url: "/api/rag/direct_search", // Correct endpoint
+    url: "/api/rag/direct_search",
     type: "POST",
     contentType: "application/json",
     data: JSON.stringify(payload),
@@ -309,7 +338,8 @@ function handleDirectRagSearch() {
  * Initializes event listeners for RAG controls.
  */
 function initRagEventListeners() {
-  $("#rag-tab-btn").on("shown.bs.tab", function () {
+  $("#rag-tab-main-btn").on("shown.bs.tab", function () {
+    // Updated selector for main RAG tab
     fetchAndPopulateRagCollections();
     updateRagControlsState();
   });
@@ -365,7 +395,6 @@ function initRagEventListeners() {
             'Invalid JSON for RAG filter. It must be an object (e.g., {"key": "value"}). Sticking to previous value.',
             "danger",
           );
-          // Revert input to previous valid state
           $(this).val(
             window.currentRagSettings.filter &&
               Object.keys(window.currentRagSettings.filter).length > 0
@@ -380,7 +409,6 @@ function initRagEventListeners() {
           "Invalid JSON format for RAG filter. Sticking to previous value.",
           "danger",
         );
-        // Revert input to previous valid state
         $(this).val(
           window.currentRagSettings.filter &&
             Object.keys(window.currentRagSettings.filter).length > 0
@@ -397,5 +425,20 @@ function initRagEventListeners() {
     e.preventDefault();
     handleDirectRagSearch();
   });
+
+  // Event listener for adding a retrieved RAG doc to the workspace
+  $("#rag-pane-main").on("click", ".btn-add-rag-doc-to-workspace", function () {
+    const docId = $(this).data("doc-id");
+    // Placeholder for now. We need the full document content.
+    // This will likely require caching the retrieved docs in a global variable.
+    showToast(
+      "Info",
+      `Action to add RAG doc '${docId}' to workspace is not fully implemented yet.`,
+      "info",
+    );
+    // TODO: Get the full content of the document with this ID (may need to cache results)
+    // and then call `llmcore.add_text_context_item`.
+  });
+
   console.log("RAG UI event listeners initialized.");
 }
