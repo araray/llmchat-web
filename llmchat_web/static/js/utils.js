@@ -5,6 +5,7 @@
  * @description Utility functions for the llmchat-web interface.
  * This file contains general-purpose helper functions and
  * initializes global state variables to ensure they are defined early.
+ * It now includes a debounced, API-driven token estimator.
  */
 
 // --- Global State Variables Initialization ---
@@ -35,6 +36,9 @@ window.currentLlmSettings = {
 
 /** @type {Object} Stores current Prompt Template Values. */
 window.currentPromptTemplateValues = {};
+
+/** @type {number|null} Stores the timeout ID for debouncing token estimations. */
+let tokenEstimateDebounceTimer = null;
 
 console.log("UTILS.JS: Global state variables initialized on window object.");
 
@@ -177,10 +181,55 @@ function updateContextUsageDisplay(contextUsage) {
 }
 
 /**
- * Updates the token estimate display for the chat input.
+ * Updates the token estimate display for the chat input by making a debounced
+ * API call to the backend. This provides a more accurate, model-specific token count.
  */
 function updateChatInputTokenEstimate() {
+  clearTimeout(tokenEstimateDebounceTimer);
+
   const text = $("#chat-input").val();
-  const estimatedTokens = Math.ceil(text.length / 4);
-  $("#chat-input-token-estimate").text(`Tokens: ~${estimatedTokens}`);
+  const $tokenDisplay = $("#chat-input-token-estimate");
+
+  if (!text) {
+    $tokenDisplay.text("Tokens: ~0");
+    return;
+  }
+
+  // Use a short debounce delay to avoid spamming the API while typing.
+  tokenEstimateDebounceTimer = setTimeout(async () => {
+    const providerName = window.currentLlmSettings?.providerName;
+    const modelName = window.currentLlmSettings?.modelName;
+
+    if (!providerName) {
+      // Don't show an error, just indicate we can't estimate yet.
+      $tokenDisplay.text("Tokens: (select provider)");
+      return;
+    }
+
+    $tokenDisplay.text("Tokens: Calculating...");
+
+    try {
+      const response = await fetch("/api/utils/estimate_tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: text,
+          provider_name: providerName,
+          model_name: modelName, // Can be null, backend will use provider's default
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || "API error");
+      }
+
+      const data = await response.json();
+      $tokenDisplay.text(`Tokens: ~${data.token_count}`);
+    } catch (error) {
+      console.error("UTILS.JS: Error estimating chat input tokens:", error);
+      $tokenDisplay.text("Tokens: Error");
+      // Silently fail in the UI to avoid distracting the user.
+    }
+  }, 300); // 300ms debounce delay
 }
