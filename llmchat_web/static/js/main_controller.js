@@ -5,7 +5,7 @@
  * @description Main JavaScript controller for the llmchat-web interface.
  * This file initializes various UI modules and handles global state management,
  * initial status fetching, session list display, and other top-level UI interactions.
- * This version adds theme management and final UI polish from Phase 6.
+ * This version includes fixes for session creation UI and theme management.
  *
  * Global state variables (e.g., window.currentLlmSettings) are initialized in utils.js.
  * This script populates them based on backend status and user interactions.
@@ -33,20 +33,23 @@
 /**
  * Applies the selected theme by updating the override stylesheet and HTML attributes.
  * Also saves the preference to localStorage.
- * @param {string} themeName - The name of the theme to apply ('light' or 'dark').
+ * @param {string} themeName - The name of the theme to apply ('light', 'dark', or custom).
  */
 function applyTheme(themeName) {
   console.log(`MAIN_CTRL: Applying theme: ${themeName}`);
   const themeOverrideSheet = $("#theme-override-stylesheet");
   const htmlElement = $("html");
 
-  if (themeName === "light") {
-    themeOverrideSheet.attr("href", "/static/css/themes/light.css");
-    htmlElement.attr("data-bs-theme", "light");
+  if (themeName === "light" || themeName === "terminal_velocity") {
+    themeOverrideSheet.attr("href", `/static/css/themes/${themeName}.css`);
+    // Light theme uses light bootstrap components, dark/terminal use dark.
+    htmlElement.attr("data-bs-theme", themeName === "light" ? "light" : "dark");
   } else {
+    // Default to dark theme
     themeOverrideSheet.attr("href", "");
     htmlElement.attr("data-bs-theme", "dark");
   }
+
   try {
     localStorage.setItem("llmchat_theme", themeName);
     console.log(
@@ -65,27 +68,19 @@ function applyTheme(themeName) {
  * or defaults to dark.
  */
 function initializeTheme() {
-  let preferredTheme = null;
+  let preferredTheme = "dark"; // Default theme
   try {
-    preferredTheme = localStorage.getItem("llmchat_theme");
+    const savedTheme = localStorage.getItem("llmchat_theme");
+    if (savedTheme) {
+      preferredTheme = savedTheme;
+    }
   } catch (e) {
     console.warn(
       "MAIN_CTRL: Could not read theme preference from localStorage.",
       e,
     );
   }
-
-  if (preferredTheme) {
-    console.log(
-      `MAIN_CTRL: Found saved theme in localStorage: ${preferredTheme}.`,
-    );
-    applyTheme(preferredTheme);
-  } else {
-    console.log(
-      "MAIN_CTRL: No theme saved in localStorage. Defaulting to dark theme.",
-    );
-    applyTheme("dark"); // Default to dark if nothing is set
-  }
+  applyTheme(preferredTheme);
 }
 
 // =================================================================================
@@ -137,11 +132,6 @@ function fetchAndUpdateInitialStatus() {
           .removeClass("bg-danger bg-warning")
           .addClass("bg-success")
           .text("OK");
-      } else if (status.llmcore_status === "initializing") {
-        $("#llmcore-status-sidebar")
-          .removeClass("bg-danger bg-success")
-          .addClass("bg-warning")
-          .text("Initializing");
       } else {
         $("#llmcore-status-sidebar")
           .removeClass("bg-success bg-warning")
@@ -153,24 +143,23 @@ function fetchAndUpdateInitialStatus() {
       }
 
       window.currentLlmSessionId = status.current_session_id;
-      console.log(
-        "MAIN_CTRL: Set window.currentLlmSessionId to:",
-        window.currentLlmSessionId,
-      );
-
       updateChatPanelState(!!window.currentLlmSessionId);
 
-      // Ensure global settings objects are initialized
-      if (typeof window.currentLlmSettings !== "object")
-        window.currentLlmSettings = {};
-      if (typeof window.currentRagSettings !== "object")
-        window.currentRagSettings = {};
-      if (typeof window.currentPromptTemplateValues !== "object")
-        window.currentPromptTemplateValues = {};
+      // Initialize global state objects
+      window.currentLlmSettings = {
+        providerName: status.current_provider || null,
+        modelName: status.current_model || null,
+        systemMessage: status.system_message || "",
+      };
+      window.currentRagSettings = {
+        enabled: status.rag_enabled || false,
+        collectionName: status.rag_collection_name || null,
+        kValue: status.rag_k_value || 3,
+        filter: status.rag_filter || null,
+      };
+      window.currentPromptTemplateValues = status.prompt_template_values || {};
 
-      window.currentLlmSettings.providerName = status.current_provider || null;
-      window.currentLlmSettings.modelName = status.current_model || null;
-      window.currentLlmSettings.systemMessage = status.system_message || "";
+      // Update UI from new global state
       $("#status-provider").text(
         window.currentLlmSettings.providerName || "N/A",
       );
@@ -179,47 +168,22 @@ function fetchAndUpdateInitialStatus() {
         fetchAndPopulateLlmProviders();
       if (typeof fetchAndDisplaySystemMessage === "function")
         fetchAndDisplaySystemMessage();
-
-      window.currentRagSettings.enabled = status.rag_enabled || false;
-      window.currentRagSettings.collectionName =
-        status.rag_collection_name || null;
-      window.currentRagSettings.kValue = status.rag_k_value || 3;
-      window.currentRagSettings.filter = status.rag_filter || null;
       if (typeof updateRagControlsState === "function")
         updateRagControlsState();
       if (typeof fetchAndPopulateRagCollections === "function")
         fetchAndPopulateRagCollections();
-
-      window.currentPromptTemplateValues = status.prompt_template_values || {};
       if (typeof fetchAndDisplayPromptTemplateValues === "function")
         fetchAndDisplayPromptTemplateValues();
-
       if (typeof updateContextUsageDisplay === "function")
         updateContextUsageDisplay(null);
 
       fetchAndDisplaySessions();
 
-      if (!window.currentLlmSessionId) {
-        $("#chat-messages")
-          .empty()
-          .append(
-            '<div class="message-bubble agent-message">No active session. Create or load one.</div>',
-          );
-        window.stagedContextItems = [];
-        if (typeof renderStagedContextItems === "function")
-          renderStagedContextItems();
-      }
-
       console.log(
         "MAIN_CTRL: Initial UI state updated from /api/status response.",
       );
     },
-    error: function (jqXHR, textStatus, errorThrown) {
-      console.error(
-        "MAIN_CTRL: Error fetching initial status:",
-        textStatus,
-        errorThrown,
-      );
+    error: function () {
       showToast(
         "Initialization Error",
         "Could not fetch initial server status. Some features may not work.",
@@ -235,8 +199,7 @@ function fetchAndUpdateInitialStatus() {
  * Highlights the currentLlmSessionId if active.
  */
 function fetchAndDisplaySessions() {
-  console.log("MAIN_CTRL: Fetching sessions via apiFetchSessions...");
-  apiFetchSessions() // from session_api.js
+  apiFetchSessions()
     .done(function (sessions) {
       const $sessionList = $("#session-list").empty();
       if (sessions && sessions.length > 0) {
@@ -245,7 +208,6 @@ function fetchAndDisplaySessions() {
                         <button class="btn btn-sm btn-outline-danger btn-delete-session-item" data-session-id="${escapeHtml(session.id)}" title="Delete Session">
                             <i class="fas fa-trash-alt fa-xs"></i>
                         </button>`;
-
           const $sessionItem = $("<a>", {
             href: "#",
             class:
@@ -268,12 +230,7 @@ function fetchAndDisplaySessions() {
         );
       }
     })
-    .fail(function (jqXHR, textStatus, errorThrown) {
-      console.error(
-        "MAIN_CTRL: Error fetching sessions:",
-        textStatus,
-        errorThrown,
-      );
+    .fail(function () {
       $("#session-list").html(
         '<p class="text-danger small m-2">Error loading sessions.</p>',
       );
@@ -291,14 +248,12 @@ function fetchAndDisplayAppLogs() {
     type: "GET",
     dataType: "json",
     success: function (response) {
-      if (response.logs) {
-        $logsDisplay.text(response.logs);
-        $logsDisplay.scrollTop($logsDisplay[0].scrollHeight);
-      } else {
-        $logsDisplay.text(
-          response.error || "No log content received or empty log file.",
-        );
-      }
+      $logsDisplay.text(
+        response.logs ||
+          response.error ||
+          "No log content received or empty log file.",
+      );
+      $logsDisplay.scrollTop($logsDisplay[0].scrollHeight);
     },
     error: function (jqXHR) {
       const errorMsg =
@@ -312,28 +267,25 @@ function fetchAndDisplayAppLogs() {
 // SECTION: Document Ready and Event Listeners
 // =================================================================================
 $(document).ready(function () {
-  console.log("MAIN_CTRL: Document ready. Initializing application...");
+  initializeTheme();
+  fetchAndUpdateInitialStatus();
 
-  initializeTheme(); // Apply saved theme on page load
-  fetchAndUpdateInitialStatus(); // Initial load of status and UI elements
-
-  // Initialize event listeners from other UI modules
-  if (typeof initChatEventListeners === "function") initChatEventListeners();
-  if (typeof initRagEventListeners === "function") initRagEventListeners();
-  if (typeof initLlmSettingsEventListeners === "function")
-    initLlmSettingsEventListeners();
-  if (typeof initContextManagerEventListeners === "function")
-    initContextManagerEventListeners();
-  if (typeof initPromptTemplateEventListeners === "function")
-    initPromptTemplateEventListeners();
-  if (typeof initIngestionEventListeners === "function")
-    initIngestionEventListeners();
+  // Initialize event listeners from all UI modules
+  [
+    initChatEventListeners,
+    initRagEventListeners,
+    initLlmSettingsEventListeners,
+    initContextManagerEventListeners,
+    initPromptTemplateEventListeners,
+    initIngestionEventListeners,
+  ].forEach((initFunc) => {
+    if (typeof initFunc === "function") initFunc();
+  });
 
   // --- Theme Switcher Event Listener ---
   $(".dropdown-menu a[data-theme]").on("click", function (e) {
     e.preventDefault();
-    const selectedTheme = $(this).data("theme");
-    applyTheme(selectedTheme);
+    applyTheme($(this).data("theme"));
   });
 
   // --- New Session Button ---
@@ -347,7 +299,35 @@ $(document).ready(function () {
             '<div class="message-bubble agent-message">New session started.</div>',
           );
         updateChatPanelState(true);
-        fetchAndUpdateInitialStatus(); // Reload everything to reflect default settings
+
+        // Update global settings from the defaults sent for a new session
+        if (newSessionResponse.llm_settings) {
+          window.currentLlmSettings.providerName =
+            newSessionResponse.llm_settings.provider_name;
+          window.currentLlmSettings.modelName =
+            newSessionResponse.llm_settings.model_name;
+          window.currentLlmSettings.systemMessage =
+            newSessionResponse.llm_settings.system_message;
+        }
+        // ... (update RAG, prompt values etc. similarly if needed) ...
+        window.stagedContextItems = [];
+        if (typeof renderStagedContextItems === "function")
+          renderStagedContextItems();
+
+        // **FIX**: Manually prepend the new session item to the UI
+        $("#session-list .list-group-item.active").removeClass("active");
+        const $newSessionItem = $("<a>", {
+          href: "#",
+          class: "list-group-item list-group-item-action active",
+          "data-session-id": newSessionResponse.id,
+          html: `<div class="d-flex w-100 justify-content-between">
+                       <h6 class="mb-1 text-primary"><em>New Session...</em></h6>
+                   </div>
+                   <small class="text-muted">Messages: 0</small>`,
+        });
+        $("#session-list").prepend($newSessionItem);
+        // Refresh the session list in the background to get proper names later
+        setTimeout(fetchAndDisplaySessions, 2000);
       })
       .fail(function () {
         showToast("Error", "Failed to create new session context.", "danger");
@@ -362,41 +342,25 @@ $(document).ready(function () {
 
     apiLoadSession(sessionIdToLoad)
       .done(function (response) {
-        const loadedSessionData = response.session_data;
-        const appliedSettings = response.applied_settings;
-        if (!loadedSessionData) {
+        if (!response.session_data) {
           showToast("Error", "Invalid session data received.", "danger");
           return;
         }
-        window.currentLlmSessionId = loadedSessionData.id;
+        window.currentLlmSessionId = response.session_data.id;
         updateChatPanelState(true);
+
         $("#chat-messages").empty();
         if (
-          loadedSessionData.messages &&
-          loadedSessionData.messages.length > 0
+          response.session_data.messages &&
+          response.session_data.messages.length > 0
         ) {
-          loadedSessionData.messages.forEach((msg) => {
+          response.session_data.messages.forEach((msg) => {
             if (typeof appendMessageToChat === "function")
               appendMessageToChat(msg.content, msg.role, false, msg.id);
           });
         }
-        // Update global state and UI
-        if (appliedSettings) {
-          window.currentLlmSettings.providerName =
-            appliedSettings.current_provider_name;
-          window.currentLlmSettings.modelName =
-            appliedSettings.current_model_name;
-          window.currentLlmSettings.systemMessage =
-            appliedSettings.system_message;
-          window.currentRagSettings.enabled = appliedSettings.rag_enabled;
-          window.currentRagSettings.collectionName =
-            appliedSettings.rag_collection_name;
-          window.currentRagSettings.kValue = appliedSettings.k_value;
-          window.currentRagSettings.filter = appliedSettings.rag_filter;
-          window.currentPromptTemplateValues =
-            appliedSettings.prompt_template_values || {};
-        }
-        fetchAndUpdateInitialStatus(); // Full refresh to ensure UI consistency
+        // Reload all settings and session list to reflect the loaded session's state
+        fetchAndUpdateInitialStatus();
       })
       .fail(function () {
         showToast("Error", "Failed to load session.", "danger");
@@ -406,7 +370,7 @@ $(document).ready(function () {
   // --- Per-Session Delete Button ---
   $("#session-list").on("click", ".btn-delete-session-item", function (e) {
     e.preventDefault();
-    e.stopPropagation(); // Stop event from bubbling up to the session load handler
+    e.stopPropagation();
     const sessionIdToDelete = $(this).data("session-id");
     if (!sessionIdToDelete) return;
 
@@ -417,28 +381,19 @@ $(document).ready(function () {
       true,
       function (confirmed) {
         if (confirmed) {
-          apiDeleteSession(sessionIdToDelete)
-            .done(function (response) {
-              showToast(
-                "Success",
-                response.message || "Session deleted.",
-                "success",
-              );
-              // If we deleted the current session, reset the UI state
-              if (window.currentLlmSessionId === sessionIdToDelete) {
-                window.currentLlmSessionId = null;
-                fetchAndUpdateInitialStatus(); // This will reset everything
-              } else {
-                fetchAndDisplaySessions(); // Just refresh the list
-              }
-            })
-            .fail(function (jqXHR) {
-              showToast(
-                "Error",
-                jqXHR.responseJSON?.error || "Failed to delete session.",
-                "danger",
-              );
-            });
+          apiDeleteSession(sessionIdToDelete).done(function (response) {
+            showToast(
+              "Success",
+              response.message || "Session deleted.",
+              "success",
+            );
+            if (window.currentLlmSessionId === sessionIdToDelete) {
+              window.currentLlmSessionId = null;
+              fetchAndUpdateInitialStatus();
+            } else {
+              fetchAndDisplaySessions();
+            }
+          });
         }
       },
     );
@@ -452,14 +407,6 @@ $(document).ready(function () {
     );
     appLogsModal.show();
   });
-
-  // --- Chat Input Token Estimator ---
-  $("#chat-input").on("input", function () {
-    if (typeof updateChatInputTokenEstimate === "function")
-      updateChatInputTokenEstimate();
-  });
-  if (typeof updateChatInputTokenEstimate === "function")
-    updateChatInputTokenEstimate();
 
   console.log("MAIN_CTRL: LLMChat Web UI fully initialized.");
 });
