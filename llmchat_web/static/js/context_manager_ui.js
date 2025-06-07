@@ -3,28 +3,31 @@
 /**
  * @file context_manager_ui.js
  * @description Handles UI logic for the Context Manager tab, including workspace items,
- * active context specification, and context preview.
+ * active context specification, history context selection, and context preview.
  * Depends on utils.js for helper functions (escapeHtml, showToast) and
- * accesses/modifies global variables from custom.js (currentLlmSessionId, stagedContextItems).
+ * accesses/modifies global variables from main_controller.js (currentLlmSessionId, stagedContextItems).
  */
+
+// =================================================================================
+// SECTION: Workspace & Staging Management
+// =================================================================================
 
 /**
  * Fetches and displays workspace items for the current session.
- * Relies on global `currentLlmSessionId` and `escapeHtml`.
+ * Relies on global `currentLlmSessionId` from main_controller.js.
  */
 function fetchAndDisplayWorkspaceItems() {
-  if (!currentLlmSessionId) {
-    // currentLlmSessionId from custom.js
+  if (!window.currentLlmSessionId) {
     $("#workspace-items-list").html(
       '<p class="text-muted p-2">No active session to load workspace items from.</p>',
     );
     return;
   }
   console.log(
-    `CTX_MAN_UI: Fetching workspace items for session: ${currentLlmSessionId}`,
+    `CTX_MAN_UI: Fetching workspace items for session: ${window.currentLlmSessionId}`,
   );
   $.ajax({
-    url: `/api/sessions/${currentLlmSessionId}/workspace/items`,
+    url: `/api/sessions/${window.currentLlmSessionId}/workspace/items`,
     type: "GET",
     dataType: "json",
     success: function (items) {
@@ -43,10 +46,10 @@ function fetchAndDisplayWorkspaceItems() {
             class: "workspace-item",
             "data-item-id": item.id,
             "data-item-type": item.type,
-            "data-item-content-preview": item.content, // Store full content for modal
+            "data-item-content-preview": item.content,
           });
           $itemDiv.append(
-            `<div class="workspace-item-header">ID: ${escapeHtml(item.id)} (Type: ${escapeHtml(itemTypeDisplay)})</div>`, // escapeHtml from utils.js
+            `<div class="workspace-item-header">ID: ${escapeHtml(item.id)} (Type: ${escapeHtml(itemTypeDisplay)})</div>`,
           );
           $itemDiv.append(
             `<div class="small text-muted">Source: ${escapeHtml(sourceIdDisplay)}</div>`,
@@ -99,18 +102,17 @@ function fetchAndDisplayWorkspaceItems() {
 
 /**
  * Renders the staged context items in the UI.
- * Relies on global `stagedContextItems` and `escapeHtml`.
+ * Relies on global `stagedContextItems` from main_controller.js.
  */
 function renderStagedContextItems() {
   const $list = $("#active-context-spec-list").empty();
-  if (stagedContextItems.length === 0) {
-    // stagedContextItems from custom.js
+  if (window.stagedContextItems.length === 0) {
     $list.append(
       '<p class="text-muted p-2">No items staged for active context.</p>',
     );
     return;
   }
-  stagedContextItems.forEach(function (item, index) {
+  window.stagedContextItems.forEach(function (item, index) {
     const $itemDiv = $("<div>", {
       class: "staged-context-item",
       "data-staged-item-spec-id": item.spec_item_id,
@@ -120,7 +122,7 @@ function renderStagedContextItems() {
       itemTypeDisplay.charAt(0).toUpperCase() + itemTypeDisplay.slice(1);
 
     $itemDiv.append(
-      `<div class="staged-item-header">ID: ${escapeHtml(item.spec_item_id)} (Type: ${escapeHtml(itemTypeDisplay)})</div>`, // escapeHtml from utils.js
+      `<div class="staged-item-header">ID: ${escapeHtml(item.spec_item_id)} (Type: ${escapeHtml(itemTypeDisplay)})</div>`,
     );
 
     let sourceDisplay = "N/A";
@@ -183,7 +185,6 @@ function addStagedContextItem(
   no_truncate = false,
 ) {
   const spec_item_id = `actx_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-  // Modifies global stagedContextItems from custom.js
   window.stagedContextItems.push({
     spec_item_id: spec_item_id,
     type: type,
@@ -204,7 +205,6 @@ function addStagedContextItem(
  * @param {string} spec_item_id_to_remove - The unique ID of the staged item to remove.
  */
 function removeStagedContextItem(spec_item_id_to_remove) {
-  // Modifies global stagedContextItems from custom.js
   window.stagedContextItems = window.stagedContextItems.filter(
     (item) => item.spec_item_id !== spec_item_id_to_remove,
   );
@@ -215,9 +215,104 @@ function removeStagedContextItem(spec_item_id_to_remove) {
   );
 }
 
+// =================================================================================
+// SECTION: History Context Management
+// =================================================================================
+
+/**
+ * Renders the list of session messages with checkboxes for context inclusion.
+ * @param {Array<Object>} messages - The array of message objects from the session.
+ * @param {Object} messageInclusionMap - A map of messageId -> boolean indicating inclusion state.
+ */
+function renderHistoryContextList(messages, messageInclusionMap = {}) {
+  const $list = $("#history-context-message-list").empty();
+  if (!messages || messages.length === 0) {
+    $list.html(
+      '<p class="text-muted p-2">No messages in this session yet.</p>',
+    );
+    return;
+  }
+  messages.forEach(function (msg) {
+    // Default to true (checked) if a message is not in the map
+    const isChecked = messageInclusionMap[msg.id] !== false;
+    const contentPreview = msg.content
+      ? msg.content.substring(0, 150) + (msg.content.length > 150 ? "..." : "")
+      : "[Empty message]";
+    const roleClass =
+      msg.role === "user"
+        ? "text-primary"
+        : msg.role === "assistant"
+          ? "text-info"
+          : "text-secondary";
+
+    const $itemDiv = $("<div>", {
+      class: "form-check history-context-item",
+      "data-message-id": msg.id,
+    });
+    const $checkbox = $("<input>", {
+      class: "form-check-input",
+      type: "checkbox",
+      id: `history-check-${msg.id}`,
+      "data-message-id": msg.id,
+      checked: isChecked,
+    });
+    const $label = $("<label>", {
+      class: "form-check-label",
+      for: `history-check-${msg.id}`,
+      html: `<strong class="${roleClass}">${escapeHtml(msg.role.toUpperCase())}:</strong> ${escapeHtml(contentPreview)}`,
+    });
+
+    $itemDiv.append($checkbox, $label);
+    $list.append($itemDiv);
+  });
+  console.log("CTX_MAN_UI: History context list rendered.");
+}
+
+/**
+ * Fetches the current session data and displays the history context management UI.
+ */
+function fetchAndDisplayHistoryContext() {
+  if (!window.currentLlmSessionId) {
+    $("#history-context-message-list").html(
+      '<p class="text-muted p-2">No active session.</p>',
+    );
+    return;
+  }
+  console.log(
+    `CTX_MAN_UI: Fetching full session for history context: ${window.currentLlmSessionId}`,
+  );
+  // Use the session_api.js helper function
+  apiLoadSession(window.currentLlmSessionId)
+    .done(function (response) {
+      if (response && response.session_data) {
+        const session = response.session_data;
+        // The inclusion map is stored in the client-specific metadata
+        const clientData = session.metadata?.client_data || {};
+        const messageInclusionMap = clientData.message_inclusion_map || {};
+        renderHistoryContextList(session.messages, messageInclusionMap);
+      } else {
+        $("#history-context-message-list").html(
+          '<p class="text-danger p-2">Could not load session data.</p>',
+        );
+      }
+    })
+    .fail(function (jqXHR) {
+      console.error(
+        "CTX_MAN_UI: Error fetching session for history context:",
+        jqXHR.responseJSON,
+      );
+      $("#history-context-message-list").html(
+        '<p class="text-danger p-2">Error loading session data.</p>',
+      );
+    });
+}
+
+// =================================================================================
+// SECTION: Context Preview
+// =================================================================================
+
 /**
  * Renders the content of the context preview modal.
- * Relies on global `escapeHtml`.
  * @param {object} data - The context preview data from the backend.
  */
 function renderContextPreviewModal(data) {
@@ -231,7 +326,7 @@ function renderContextPreviewModal(data) {
     `<h5><i class="fas fa-file-alt"></i> Effective Context for LLM</h5>`,
   );
   $display.append(
-    `<p class="mb-1"><small class="text-muted">LLM Provider: ${escapeHtml(data.provider_name) || "N/A"}, Model: ${escapeHtml(data.model_name) || "N/A"}</small></p>`, // escapeHtml from utils.js
+    `<p class="mb-1"><small class="text-muted">LLM Provider: ${escapeHtml(data.provider_name) || "N/A"}, Model: ${escapeHtml(data.model_name) || "N/A"}</small></p>`,
   );
   $display.append(
     `<p class="mb-1"><small class="text-muted">Max Tokens: ${data.max_tokens_for_model || "N/A"}, Final Token Count: <strong>${data.final_token_count || "N/A"}</strong></small></p>`,
@@ -298,47 +393,63 @@ function renderContextPreviewModal(data) {
   console.log("CTX_MAN_UI: Context preview modal rendered.");
 }
 
+// =================================================================================
+// SECTION: Event Listeners
+// =================================================================================
+
 /**
  * Initializes event listeners for the Context Manager tab.
  */
 function initContextManagerEventListeners() {
+  // --- Workspace & Staging Event Listeners ---
   $("#context-manager-tab-btn").on("shown.bs.tab", function (e) {
+    const targetTabId = $(e.target).attr("id");
+    // This is now the main tab, so we need to check which sub-tab is active
+    if ($("#workspace-subtab-btn").hasClass("active")) {
+      fetchAndDisplayWorkspaceItems();
+      renderStagedContextItems();
+    } else if ($("#history-subtab-btn").hasClass("active")) {
+      fetchAndDisplayHistoryContext();
+    }
+  });
+
+  // Handle switching between the new sub-tabs
+  $("#workspace-subtab-btn").on("shown.bs.tab", function () {
     fetchAndDisplayWorkspaceItems();
     renderStagedContextItems();
+  });
+
+  $("#history-subtab-btn").on("shown.bs.tab", function () {
+    fetchAndDisplayHistoryContext();
   });
 
   $("#form-add-text-snippet").on("submit", function (e) {
     e.preventDefault();
     const content = $("#text-snippet-content").val().trim();
     const customId = $("#text-snippet-id").val().trim() || null;
-    if (!content || !currentLlmSessionId) {
-      // currentLlmSessionId from custom.js
-      showToast("Error", "Content and active session are required.", "danger"); // showToast from utils.js
+    if (!content || !window.currentLlmSessionId) {
+      showToast("Error", "Content and active session are required.", "danger");
       return;
     }
     $.ajax({
-      url: `/api/sessions/${currentLlmSessionId}/workspace/add_text`,
+      url: `/api/sessions/${window.currentLlmSessionId}/workspace/add_text`,
       type: "POST",
       contentType: "application/json",
       data: JSON.stringify({ content: content, item_id: customId }),
       dataType: "json",
       success: function (response) {
-        console.log("CTX_MAN_UI: Add text snippet response:", response);
         showToast(
           "Success",
-          `Text snippet added as item: ${escapeHtml(response.id)}`, // escapeHtml from utils.js
+          `Text snippet added as item: ${escapeHtml(response.id)}`,
           "success",
         );
         $("#form-add-text-snippet")[0].reset();
         fetchAndDisplayWorkspaceItems();
       },
-      error: function (jqXHR, textStatus, errorThrown) {
-        console.error(
-          "CTX_MAN_UI: Error adding text snippet:",
-          textStatus,
-          errorThrown,
-        );
-        showToast("Error", "Failed to add text snippet.", "danger");
+      error: function (jqXHR) {
+        const errorMsg =
+          jqXHR.responseJSON?.error || "Failed to add text snippet.";
+        showToast("Error", errorMsg, "danger");
       },
     });
   });
@@ -347,8 +458,7 @@ function initContextManagerEventListeners() {
     e.preventDefault();
     const filePath = $("#file-path-input").val().trim();
     const customId = $("#file-item-id").val().trim() || null;
-    if (!filePath || !currentLlmSessionId) {
-      // currentLlmSessionId from custom.js
+    if (!filePath || !window.currentLlmSessionId) {
       showToast(
         "Error",
         "File path and active session are required.",
@@ -357,13 +467,12 @@ function initContextManagerEventListeners() {
       return;
     }
     $.ajax({
-      url: `/api/sessions/${currentLlmSessionId}/workspace/add_file`,
+      url: `/api/sessions/${window.currentLlmSessionId}/workspace/add_file`,
       type: "POST",
       contentType: "application/json",
       data: JSON.stringify({ file_path: filePath, item_id: customId }),
       dataType: "json",
       success: function (response) {
-        console.log("CTX_MAN_UI: Add file by path response:", response);
         showToast(
           "Success",
           `File added as item: ${escapeHtml(response.id)}`,
@@ -372,15 +481,9 @@ function initContextManagerEventListeners() {
         $("#form-add-file-by-path")[0].reset();
         fetchAndDisplayWorkspaceItems();
       },
-      error: function (jqXHR, textStatus, errorThrown) {
-        console.error(
-          "CTX_MAN_UI: Error adding file by path:",
-          textStatus,
-          errorThrown,
-        );
-        const errorMsg = jqXHR.responseJSON
-          ? jqXHR.responseJSON.error
-          : "Failed to add file by path.";
+      error: function (jqXHR) {
+        const errorMsg =
+          jqXHR.responseJSON?.error || "Failed to add file by path.";
         showToast("Error", errorMsg, "danger");
       },
     });
@@ -391,9 +494,9 @@ function initContextManagerEventListeners() {
     ".btn-view-workspace-item",
     function () {
       const itemId = $(this).closest(".workspace-item").data("item-id");
-      if (!itemId || !currentLlmSessionId) return; // currentLlmSessionId from custom.js
+      if (!itemId || !window.currentLlmSessionId) return;
       $.ajax({
-        url: `/api/sessions/${currentLlmSessionId}/workspace/items/${itemId}`,
+        url: `/api/sessions/${window.currentLlmSessionId}/workspace/items/${itemId}`,
         type: "GET",
         dataType: "json",
         success: function (item) {
@@ -401,7 +504,7 @@ function initContextManagerEventListeners() {
             item.content || "No content available.",
           );
           $("#viewItemContentModalLabel").text(
-            `Content of Item: ${escapeHtml(item.id)} (Type: ${escapeHtml(item.type)})`, // escapeHtml from utils.js
+            `Content of Item: ${escapeHtml(item.id)} (Type: ${escapeHtml(item.type)})`,
           );
           var myModal = new bootstrap.Modal(
             document.getElementById("viewItemContentModal"),
@@ -409,7 +512,7 @@ function initContextManagerEventListeners() {
           myModal.show();
         },
         error: function () {
-          showToast("Error", "Error fetching item content.", "danger"); // showToast from utils.js
+          showToast("Error", "Error fetching item content.", "danger");
         },
       });
     },
@@ -420,9 +523,8 @@ function initContextManagerEventListeners() {
     ".btn-remove-workspace-item",
     function () {
       const itemId = $(this).closest(".workspace-item").data("item-id");
-      if (!itemId || !currentLlmSessionId) return; // currentLlmSessionId from custom.js
+      if (!itemId || !window.currentLlmSessionId) return;
       showToast(
-        // showToast from utils.js
         "Confirm",
         `Remove workspace item ${itemId}?`,
         "warning",
@@ -430,7 +532,7 @@ function initContextManagerEventListeners() {
         function (confirmed) {
           if (confirmed) {
             $.ajax({
-              url: `/api/sessions/${currentLlmSessionId}/workspace/items/${itemId}`,
+              url: `/api/sessions/${window.currentLlmSessionId}/workspace/items/${itemId}`,
               type: "DELETE",
               dataType: "json",
               success: function (response) {
@@ -440,9 +542,7 @@ function initContextManagerEventListeners() {
                   "success",
                 );
                 fetchAndDisplayWorkspaceItems();
-                // Also remove from client-side staged items if it was staged
                 window.stagedContextItems = window.stagedContextItems.filter(
-                  // stagedContextItems from custom.js
                   (si) =>
                     !(si.type === "workspace_item" && si.id_ref === itemId),
                 );
@@ -467,9 +567,8 @@ function initContextManagerEventListeners() {
       const contentPreview =
         $itemDiv.data("item-content-preview") ||
         "Content not available for preview.";
-      addStagedContextItem("workspace_item", itemId, contentPreview, null); // Modifies global stagedContextItems
+      addStagedContextItem("workspace_item", itemId, contentPreview, null);
       showToast(
-        // showToast from utils.js
         "Staged",
         `Workspace item ${itemId} added to active context.`,
         "info",
@@ -477,37 +576,33 @@ function initContextManagerEventListeners() {
     },
   );
 
-  $("#btn-stage-from-workspace").on("click", function () {
-    showToast(
-      // showToast from utils.js
-      "Info",
-      "Modal to select from workspace items - Not Implemented Yet.",
-      "info",
-    );
-  });
-
-  $("#btn-stage-from-history").on("click", function () {
-    showToast(
-      // showToast from utils.js
-      "Info",
-      "Modal to select from chat history - Not Implemented Yet.",
-      "info",
-    );
-  });
-
-  $("#btn-stage-new-file").on("click", function () {
-    const filePath = prompt("Enter server path to file to stage:");
-    if (filePath && filePath.trim() !== "") {
-      addStagedContextItem("file_content", null, null, filePath.trim()); // Modifies global stagedContextItems
-      showToast("Staged", `File ${filePath} added to active context.`, "info"); // showToast from utils.js
-    }
-  });
-
-  $("#btn-stage-new-text").on("click", function () {
-    const textContent = prompt("Enter text content to stage:");
-    if (textContent && textContent.trim() !== "") {
-      addStagedContextItem("text_content", null, textContent.trim(), null); // Modifies global stagedContextItems
-      showToast("Staged", `Text snippet added to active context.`, "info"); // showToast from utils.js
+  $(
+    "#btn-stage-from-workspace, #btn-stage-from-history, #btn-stage-new-file, #btn-stage-new-text",
+  ).on("click", function () {
+    // This is simplified for brevity. A real implementation might open modals to select items.
+    const actionId = $(this).attr("id");
+    if (actionId === "btn-stage-new-file") {
+      const filePath = prompt("Enter server path to file to stage:");
+      if (filePath && filePath.trim() !== "") {
+        addStagedContextItem("file_content", null, null, filePath.trim());
+        showToast(
+          "Staged",
+          `File ${filePath} added to active context.`,
+          "info",
+        );
+      }
+    } else if (actionId === "btn-stage-new-text") {
+      const textContent = prompt("Enter text content to stage:");
+      if (textContent && textContent.trim() !== "") {
+        addStagedContextItem("text_content", null, textContent.trim(), null);
+        showToast("Staged", `Text snippet added to active context.`, "info");
+      }
+    } else {
+      showToast(
+        "Info",
+        "This staging method is not fully implemented yet.",
+        "info",
+      );
     }
   });
 
@@ -516,9 +611,8 @@ function initContextManagerEventListeners() {
     ".btn-remove-staged-item",
     function () {
       const specItemId = $(this).data("staged-item-spec-id");
-      removeStagedContextItem(specItemId); // Modifies global stagedContextItems
+      removeStagedContextItem(specItemId);
       showToast(
-        // showToast from utils.js
         "Removed",
         `Item ${specItemId} removed from active context.`,
         "info",
@@ -532,20 +626,17 @@ function initContextManagerEventListeners() {
     function () {
       const specItemId = $(this).data("staged-item-spec-id");
       const item = window.stagedContextItems.find(
-        // stagedContextItems from custom.js
         (i) => i.spec_item_id === specItemId,
       );
       if (item && item.type === "text_content") {
         const newContent = prompt("Edit staged text content:", item.content);
         if (newContent !== null) {
-          // Check if prompt was cancelled
-          item.content = newContent; // Modifies global stagedContextItems
+          item.content = newContent;
           renderStagedContextItems();
-          showToast("Updated", `Staged item ${specItemId} updated.`, "info"); // showToast from utils.js
+          showToast("Updated", `Staged item ${specItemId} updated.`, "info");
         }
       } else {
         showToast(
-          // showToast from utils.js
           "Warning",
           "Can only edit staged text items directly.",
           "warning",
@@ -555,9 +646,8 @@ function initContextManagerEventListeners() {
   );
 
   $("#btn-preview-full-context").on("click", function () {
-    if (!currentLlmSessionId) {
-      // currentLlmSessionId from custom.js
-      showToast("Error", "No active session to preview context for.", "danger"); // showToast from utils.js
+    if (!window.currentLlmSessionId) {
+      showToast("Error", "No active session to preview context for.", "danger");
       return;
     }
     const userQueryForPreview =
@@ -571,28 +661,87 @@ function initContextManagerEventListeners() {
     previewModal.show();
 
     $.ajax({
-      url: `/api/sessions/${currentLlmSessionId}/context/preview`,
+      url: `/api/sessions/${window.currentLlmSessionId}/context/preview`,
       type: "POST",
       contentType: "application/json",
       data: JSON.stringify({
         current_query: userQueryForPreview,
-        staged_items: window.stagedContextItems, // Send global stagedContextItems
+        staged_items: window.stagedContextItems,
       }),
       dataType: "json",
       success: function (data) {
         renderContextPreviewModal(data);
       },
-      error: function (jqXHR, textStatus, errorThrown) {
-        console.error(
-          "CTX_MAN_UI: Error fetching context preview:",
-          textStatus,
-          errorThrown,
-        );
+      error: function (jqXHR) {
         $("#modalContextPreviewDisplay").html(
-          `<p class="text-danger">Error generating preview: ${escapeHtml(jqXHR.responseJSON ? jqXHR.responseJSON.error : errorThrown)}</p>`, // escapeHtml from utils.js
+          `<p class="text-danger">Error generating preview: ${escapeHtml(jqXHR.responseJSON?.error || "Unknown error")}</p>`,
         );
       },
     });
   });
+
+  // --- History Context Event Listeners ---
+  $("#history-context-select-all").on("click", function () {
+    $("#history-context-message-list .form-check-input").prop("checked", true);
+  });
+
+  $("#history-context-deselect-all").on("click", function () {
+    $("#history-context-message-list .form-check-input").prop("checked", false);
+  });
+
+  $("#history-context-invert").on("click", function () {
+    $("#history-context-message-list .form-check-input").each(function () {
+      $(this).prop("checked", !$(this).prop("checked"));
+    });
+  });
+
+  $("#btn-save-context-selection").on("click", function () {
+    if (!window.currentLlmSessionId) {
+      showToast("Error", "No active session to save context for.", "danger");
+      return;
+    }
+    const messageInclusionMap = {};
+    $("#history-context-message-list .form-check-input").each(function () {
+      const messageId = $(this).data("message-id");
+      const isIncluded = $(this).is(":checked");
+      messageInclusionMap[messageId] = isIncluded;
+    });
+
+    console.log(
+      "CTX_MAN_UI: Saving message inclusion map:",
+      messageInclusionMap,
+    );
+
+    $.ajax({
+      url: `/api/sessions/${window.currentLlmSessionId}/metadata`,
+      type: "POST",
+      contentType: "application/json",
+      data: JSON.stringify({
+        // llmcore expects this nested structure
+        client_data: {
+          message_inclusion_map: messageInclusionMap,
+        },
+      }),
+      dataType: "json",
+      success: function (response) {
+        showToast(
+          "Success",
+          "History context selection saved successfully.",
+          "success",
+        );
+        console.log("CTX_MAN_UI: Save context selection response:", response);
+      },
+      error: function (jqXHR) {
+        const errorMsg =
+          jqXHR.responseJSON?.error || "Failed to save context selection.";
+        showToast("Error", errorMsg, "danger");
+        console.error(
+          "CTX_MAN_UI: Error saving context selection:",
+          jqXHR.responseText,
+        );
+      },
+    });
+  });
+
   console.log("Context Manager UI event listeners initialized.");
 }
