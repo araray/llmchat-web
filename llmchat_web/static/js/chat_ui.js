@@ -145,7 +145,7 @@ async function sendMessage() {
         `<span class="text-danger">Error: ${escapeHtml(errorData.error || response.statusText)}</span>`,
       );
       if (typeof updateContextUsageDisplay === "function")
-        updateContextUsageDisplay(null);
+        updateContextUsageDisplay(null, 0);
       return;
     }
 
@@ -181,8 +181,12 @@ async function sendMessage() {
                 persistentMsgId,
               );
             } else if (eventData.type === "context_usage" && eventData.data) {
-              if (typeof updateContextUsageDisplay === "function")
-                updateContextUsageDisplay(eventData.data);
+              // Store the authoritative context usage from the last turn.
+              window.lastBaseContextUsage = eventData.data;
+              // Now, update the display. Since the prompt box is now empty, promptTokens is 0.
+              if (typeof updateContextUsageDisplay === "function") {
+                updateContextUsageDisplay(window.lastBaseContextUsage, 0);
+              }
             } else if (eventData.type === "rag_results") {
               if (typeof displayRetrievedDocuments === "function") {
                 displayRetrievedDocuments(eventData.documents || []);
@@ -228,7 +232,7 @@ async function sendMessage() {
       `<span class="text-danger">Error: ${escapeHtml(error.message || "Could not connect to chat service.")}</span>`,
     );
     if (typeof updateContextUsageDisplay === "function")
-      updateContextUsageDisplay(null);
+      updateContextUsageDisplay(null, 0);
   }
 }
 

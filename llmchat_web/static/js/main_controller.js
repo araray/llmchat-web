@@ -168,7 +168,13 @@ function fetchAndUpdateInitialStatus() {
 
       // Update context usage display with data from status response
       if (typeof updateContextUsageDisplay === "function") {
-        updateContextUsageDisplay(status.context_usage || null);
+        // The /api/status endpoint now returns the last known context usage.
+        // We store this in our global state to act as the baseline for the live counter.
+        window.lastBaseContextUsage = status.context_usage || {
+          tokens_used: 0,
+          max_tokens: 0,
+        };
+        updateContextUsageDisplay(window.lastBaseContextUsage, 0);
       }
 
       if (typeof fetchAndPopulateLlmProviders === "function")
@@ -391,7 +397,11 @@ $(document).ready(function () {
 
         // Update context usage display with data from load response
         if (typeof updateContextUsageDisplay === "function") {
-          updateContextUsageDisplay(response.context_usage || null);
+          window.lastBaseContextUsage = response.context_usage || {
+            tokens_used: 0,
+            max_tokens: 0,
+          };
+          updateContextUsageDisplay(window.lastBaseContextUsage, 0);
         }
 
         if (typeof updateRagControlsState === "function")
