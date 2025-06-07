@@ -390,6 +390,14 @@ block head_extra %}
         padding: 0.2rem 0.4rem; /* Slightly smaller buttons */
         font-size: 0.75rem;
     }
+
+    /* Prompt Workbench Styling */
+    #prompt-workbench-textarea {
+        background-color: #2c3034;
+        color: #dee2e6;
+        border-color: #495057;
+        resize: vertical; /* Allow vertical resizing */
+    }
 </style>
 {% endblock %} {% block body %}
 <nav class="top-bar d-flex justify-content-between align-items-center">
@@ -530,304 +538,359 @@ block head_extra %}
                 aria-labelledby="context-manager-tab-btn"
                 tabindex="0"
             >
-                <!-- Start: New Nested Tab Structure -->
-                <ul
-                    class="nav nav-pills mb-3"
-                    id="contextSubTabs"
-                    role="tablist"
-                >
-                    <li class="nav-item" role="presentation">
-                        <button
-                            class="nav-link active"
-                            id="workspace-subtab-btn"
-                            data-bs-toggle="tab"
-                            data-bs-target="#workspace-subtab-pane"
-                            type="button"
-                            role="tab"
-                            aria-controls="workspace-subtab-pane"
-                            aria-selected="true"
+                <!-- START: New Context Mode Toggle and UI containers -->
+                <div class="d-flex justify-content-end align-items-center mb-2">
+                    <div class="form-check form-switch">
+                        <input
+                            class="form-check-input"
+                            type="checkbox"
+                            role="switch"
+                            id="context-mode-toggle"
+                        />
+                        <label
+                            class="form-check-label small"
+                            for="context-mode-toggle"
+                            >UI Managed Context</label
                         >
-                            <i class="fas fa-briefcase"></i> Workspace & Staging
-                        </button>
-                    </li>
-                    <li class="nav-item" role="presentation">
-                        <button
-                            class="nav-link"
-                            id="history-subtab-btn"
-                            data-bs-toggle="tab"
-                            data-bs-target="#history-subtab-pane"
-                            type="button"
-                            role="tab"
-                            aria-controls="history-subtab-pane"
-                            aria-selected="false"
-                        >
-                            <i class="fas fa-history"></i> History Context
-                        </button>
-                    </li>
-                </ul>
-                <div class="tab-content flex-grow-1" id="contextSubTabsContent">
-                    <div
-                        class="tab-pane fade show active tab-pane-full-height"
-                        id="workspace-subtab-pane"
-                        role="tabpanel"
-                        aria-labelledby="workspace-subtab-btn"
+                    </div>
+                </div>
+
+                <!-- LLMCore Managed UI (default) -->
+                <div id="llmcore-managed-context-ui" class="d-flex-fill-column">
+                    <ul
+                        class="nav nav-pills mb-3"
+                        id="contextSubTabs"
+                        role="tablist"
                     >
-                        <!-- Original Two-Column Layout Goes Here -->
-                        <div class="row h-100">
-                            <div class="col-md-6 d-flex flex-column h-100">
-                                <h5>
-                                    <i class="fas fa-briefcase"></i> Workspace
-                                    Items (Context Pool)
-                                </h5>
-                                <div
-                                    id="workspace-items-list"
-                                    class="mb-3 border rounded p-2 flex-grow-1"
-                                    style="overflow-y: auto"
-                                >
-                                    <p class="text-muted p-2">
-                                        Workspace items for the current session
-                                        will appear here...
-                                    </p>
-                                </div>
-                                <div class="mt-auto">
-                                    <h6>
-                                        <i class="fas fa-plus-circle"></i> Add
-                                        Text Snippet
-                                    </h6>
-                                    <form
-                                        id="form-add-text-snippet"
-                                        class="mb-3"
-                                    >
-                                        <div class="mb-2">
-                                            <label
-                                                for="text-snippet-content"
-                                                class="form-label form-label-sm"
-                                                >Content:</label
-                                            >
-                                            <textarea
-                                                class="form-control form-control-sm"
-                                                id="text-snippet-content"
-                                                rows="2"
-                                                required
-                                            ></textarea>
-                                        </div>
-                                        <div class="mb-2">
-                                            <label
-                                                for="text-snippet-id"
-                                                class="form-label form-label-sm"
-                                                >Optional Item ID:</label
-                                            >
-                                            <input
-                                                type="text"
-                                                class="form-control form-control-sm"
-                                                id="text-snippet-id"
-                                                placeholder="Auto-generated if blank"
-                                            />
-                                        </div>
-                                        <button
-                                            type="submit"
-                                            class="btn btn-sm btn-success"
-                                        >
-                                            <i class="fas fa-plus"></i> Add
-                                            Snippet
-                                        </button>
-                                    </form>
-                                    <hr />
-                                    <h6>
-                                        <i class="fas fa-file-medical"></i> Add
-                                        File by Server Path
-                                    </h6>
-                                    <form
-                                        id="form-add-file-by-path"
-                                        class="mb-2"
-                                    >
-                                        <div class="mb-2">
-                                            <label
-                                                for="file-path-input"
-                                                class="form-label form-label-sm"
-                                                >Server File Path:</label
-                                            >
-                                            <input
-                                                type="text"
-                                                class="form-control form-control-sm"
-                                                id="file-path-input"
-                                                placeholder="/path/to/your/file_on_server.txt"
-                                                required
-                                            />
-                                        </div>
-                                        <div class="mb-2">
-                                            <label
-                                                for="file-item-id"
-                                                class="form-label form-label-sm"
-                                                >Optional Item ID:</label
-                                            >
-                                            <input
-                                                type="text"
-                                                class="form-control form-control-sm"
-                                                id="file-item-id"
-                                                placeholder="Auto-generated if blank"
-                                            />
-                                        </div>
-                                        <button
-                                            type="submit"
-                                            class="btn btn-sm btn-success"
-                                        >
-                                            <i class="fas fa-plus"></i> Add File
-                                        </button>
-                                    </form>
-                                </div>
-                            </div>
-                            <div class="col-md-6 d-flex flex-column h-100">
-                                <h5>
-                                    <i class="fas fa-cogs"></i> Active Context
-                                    Specification (for next prompt)
-                                </h5>
-                                <div class="input-group mb-2">
-                                    <span class="input-group-text"
-                                        ><i class="fas fa-search"></i
-                                    ></span>
-                                    <input
-                                        type="text"
-                                        class="form-control form-control-sm"
-                                        id="context-preview-query-input"
-                                        placeholder="Optional: Type next query for more accurate preview..."
-                                    />
-                                </div>
-                                <div
-                                    id="active-context-spec-list"
-                                    class="border rounded p-2 mb-2 flex-grow-1"
-                                    style="overflow-y: auto"
-                                >
-                                    <p class="text-muted p-2">
-                                        Staged items for the next prompt will
-                                        appear here. Add from Workspace,
-                                        History, or create new.
-                                    </p>
-                                </div>
-                                <div class="mt-auto">
-                                    <p class="small text-muted">
-                                        Add to Active Context:
-                                    </p>
+                        <li class="nav-item" role="presentation">
+                            <button
+                                class="nav-link active"
+                                id="workspace-subtab-btn"
+                                data-bs-toggle="tab"
+                                data-bs-target="#workspace-subtab-pane"
+                                type="button"
+                                role="tab"
+                                aria-controls="workspace-subtab-pane"
+                                aria-selected="true"
+                            >
+                                <i class="fas fa-briefcase"></i> Workspace &
+                                Staging
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button
+                                class="nav-link"
+                                id="history-subtab-btn"
+                                data-bs-toggle="tab"
+                                data-bs-target="#history-subtab-pane"
+                                type="button"
+                                role="tab"
+                                aria-controls="history-subtab-pane"
+                                aria-selected="false"
+                            >
+                                <i class="fas fa-history"></i> History Context
+                            </button>
+                        </li>
+                    </ul>
+                    <div
+                        class="tab-content flex-grow-1"
+                        id="contextSubTabsContent"
+                    >
+                        <div
+                            class="tab-pane fade show active tab-pane-full-height"
+                            id="workspace-subtab-pane"
+                            role="tabpanel"
+                            aria-labelledby="workspace-subtab-btn"
+                        >
+                            <!-- Original Two-Column Layout Goes Here -->
+                            <div class="row h-100">
+                                <div class="col-md-6 d-flex flex-column h-100">
+                                    <h5>
+                                        <i class="fas fa-briefcase"></i>
+                                        Workspace Items (Context Pool)
+                                    </h5>
                                     <div
-                                        class="btn-group w-100 mb-2"
-                                        role="group"
+                                        id="workspace-items-list"
+                                        class="mb-3 border rounded p-2 flex-grow-1"
+                                        style="overflow-y: auto"
                                     >
-                                        <button
-                                            class="btn btn-sm btn-outline-primary"
-                                            id="btn-stage-from-workspace"
-                                            title="Select from Workspace Items"
+                                        <p class="text-muted p-2">
+                                            Workspace items for the current
+                                            session will appear here...
+                                        </p>
+                                    </div>
+                                    <div class="mt-auto">
+                                        <h6>
+                                            <i class="fas fa-plus-circle"></i>
+                                            Add Text Snippet
+                                        </h6>
+                                        <form
+                                            id="form-add-text-snippet"
+                                            class="mb-3"
                                         >
-                                            <i class="fas fa-briefcase"></i>
-                                            Workspace
-                                        </button>
-                                        <button
-                                            class="btn btn-sm btn-outline-primary"
-                                            id="btn-stage-from-history"
-                                            title="Select from Chat History"
+                                            <div class="mb-2">
+                                                <label
+                                                    for="text-snippet-content"
+                                                    class="form-label form-label-sm"
+                                                    >Content:</label
+                                                >
+                                                <textarea
+                                                    class="form-control form-control-sm"
+                                                    id="text-snippet-content"
+                                                    rows="2"
+                                                    required
+                                                ></textarea>
+                                            </div>
+                                            <div class="mb-2">
+                                                <label
+                                                    for="text-snippet-id"
+                                                    class="form-label form-label-sm"
+                                                    >Optional Item ID:</label
+                                                >
+                                                <input
+                                                    type="text"
+                                                    class="form-control form-control-sm"
+                                                    id="text-snippet-id"
+                                                    placeholder="Auto-generated if blank"
+                                                />
+                                            </div>
+                                            <button
+                                                type="submit"
+                                                class="btn btn-sm btn-success"
+                                            >
+                                                <i class="fas fa-plus"></i> Add
+                                                Snippet
+                                            </button>
+                                        </form>
+                                        <hr />
+                                        <h6>
+                                            <i class="fas fa-file-medical"></i>
+                                            Add File by Server Path
+                                        </h6>
+                                        <form
+                                            id="form-add-file-by-path"
+                                            class="mb-2"
                                         >
-                                            <i class="fas fa-history"></i>
-                                            History
-                                        </button>
-                                        <button
-                                            class="btn btn-sm btn-outline-primary"
-                                            id="btn-stage-new-file"
-                                            title="Add a new file by path"
+                                            <div class="mb-2">
+                                                <label
+                                                    for="file-path-input"
+                                                    class="form-label form-label-sm"
+                                                    >Server File Path:</label
+                                                >
+                                                <input
+                                                    type="text"
+                                                    class="form-control form-control-sm"
+                                                    id="file-path-input"
+                                                    placeholder="/path/to/your/file_on_server.txt"
+                                                    required
+                                                />
+                                            </div>
+                                            <div class="mb-2">
+                                                <label
+                                                    for="file-item-id"
+                                                    class="form-label form-label-sm"
+                                                    >Optional Item ID:</label
+                                                >
+                                                <input
+                                                    type="text"
+                                                    class="form-control form-control-sm"
+                                                    id="file-item-id"
+                                                    placeholder="Auto-generated if blank"
+                                                />
+                                            </div>
+                                            <button
+                                                type="submit"
+                                                class="btn btn-sm btn-success"
+                                            >
+                                                <i class="fas fa-plus"></i> Add
+                                                File
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                                <div class="col-md-6 d-flex flex-column h-100">
+                                    <h5>
+                                        <i class="fas fa-cogs"></i> Active
+                                        Context Specification (for next prompt)
+                                    </h5>
+                                    <div class="input-group mb-2">
+                                        <span class="input-group-text"
+                                            ><i class="fas fa-search"></i
+                                        ></span>
+                                        <input
+                                            type="text"
+                                            class="form-control form-control-sm"
+                                            id="context-preview-query-input"
+                                            placeholder="Optional: Type next query for more accurate preview..."
+                                        />
+                                    </div>
+                                    <div
+                                        id="active-context-spec-list"
+                                        class="border rounded p-2 mb-2 flex-grow-1"
+                                        style="overflow-y: auto"
+                                    >
+                                        <p class="text-muted p-2">
+                                            Staged items for the next prompt
+                                            will appear here. Add from
+                                            Workspace, History, or create new.
+                                        </p>
+                                    </div>
+                                    <div class="mt-auto">
+                                        <p class="small text-muted">
+                                            Add to Active Context:
+                                        </p>
+                                        <div
+                                            class="btn-group w-100 mb-2"
+                                            role="group"
                                         >
-                                            <i class="fas fa-file-alt"></i> New
-                                            File
-                                        </button>
+                                            <button
+                                                class="btn btn-sm btn-outline-primary"
+                                                id="btn-stage-from-workspace"
+                                                title="Select from Workspace Items"
+                                            >
+                                                <i class="fas fa-briefcase"></i>
+                                                Workspace
+                                            </button>
+                                            <button
+                                                class="btn btn-sm btn-outline-primary"
+                                                id="btn-stage-from-history"
+                                                title="Select from Chat History"
+                                            >
+                                                <i class="fas fa-history"></i>
+                                                History
+                                            </button>
+                                            <button
+                                                class="btn btn-sm btn-outline-primary"
+                                                id="btn-stage-new-file"
+                                                title="Add a new file by path"
+                                            >
+                                                <i class="fas fa-file-alt"></i>
+                                                New File
+                                            </button>
+                                            <button
+                                                class="btn btn-sm btn-outline-primary"
+                                                id="btn-stage-new-text"
+                                                title="Add a new text snippet"
+                                            >
+                                                <i
+                                                    class="fas fa-file-signature"
+                                                ></i>
+                                                New Text
+                                            </button>
+                                        </div>
                                         <button
-                                            class="btn btn-sm btn-outline-primary"
-                                            id="btn-stage-new-text"
-                                            title="Add a new text snippet"
+                                            class="btn btn-sm btn-info w-100"
+                                            id="btn-preview-full-context"
                                         >
-                                            <i
-                                                class="fas fa-file-signature"
-                                            ></i>
-                                            New Text
+                                            <i class="fas fa-eye"></i> Preview
+                                            Full Context for Next Prompt
                                         </button>
                                     </div>
-                                    <button
-                                        class="btn btn-sm btn-info w-100"
-                                        id="btn-preview-full-context"
-                                    >
-                                        <i class="fas fa-eye"></i> Preview Full
-                                        Context for Next Prompt
-                                    </button>
                                 </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div
-                        class="tab-pane fade tab-pane-full-height"
-                        id="history-subtab-pane"
-                        role="tabpanel"
-                        aria-labelledby="history-subtab-btn"
-                    >
-                        <!-- New UI for History Context Management -->
-                        <h5>
-                            <i class="fas fa-history"></i> Conversation History
-                            Context
-                        </h5>
-                        <p class="small text-muted">
-                            Select messages to include in the next prompt's
-                            context. Unchecked messages will be excluded.
-                        </p>
-                        <div id="history-context-toolbar" class="mb-2">
-                            <div
-                                class="btn-group btn-group-sm"
-                                role="group"
-                                aria-label="History context tools"
-                            >
-                                <button
-                                    type="button"
-                                    class="btn btn-outline-secondary"
-                                    id="history-context-select-all"
-                                >
-                                    <i class="fas fa-check-double"></i> Select
-                                    All
-                                </button>
-                                <button
-                                    type="button"
-                                    class="btn btn-outline-secondary"
-                                    id="history-context-deselect-all"
-                                >
-                                    <i class="far fa-square"></i> Deselect All
-                                </button>
-                                <button
-                                    type="button"
-                                    class="btn btn-outline-secondary"
-                                    id="history-context-invert"
-                                >
-                                    <i class="fas fa-retweet"></i> Invert
-                                </button>
                             </div>
                         </div>
                         <div
-                            id="history-context-message-list"
-                            class="border rounded p-2 flex-grow-1"
-                            style="overflow-y: auto"
+                            class="tab-pane fade tab-pane-full-height"
+                            id="history-subtab-pane"
+                            role="tabpanel"
+                            aria-labelledby="history-subtab-btn"
                         >
-                            <p class="text-muted p-2">
-                                Load a session to manage its history context...
+                            <!-- New UI for History Context Management -->
+                            <h5>
+                                <i class="fas fa-history"></i> Conversation
+                                History Context
+                            </h5>
+                            <p class="small text-muted">
+                                Select messages to include in the next prompt's
+                                context. Unchecked messages will be excluded.
                             </p>
-                        </div>
-                        <div class="mt-2">
-                            <button
-                                class="btn btn-primary btn-sm"
-                                id="btn-save-context-selection"
+                            <div id="history-context-toolbar" class="mb-2">
+                                <div
+                                    class="btn-group btn-group-sm"
+                                    role="group"
+                                    aria-label="History context tools"
+                                >
+                                    <button
+                                        type="button"
+                                        class="btn btn-outline-secondary"
+                                        id="history-context-select-all"
+                                    >
+                                        <i class="fas fa-check-double"></i>
+                                        Select All
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-outline-secondary"
+                                        id="history-context-deselect-all"
+                                    >
+                                        <i class="far fa-square"></i> Deselect
+                                        All
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-outline-secondary"
+                                        id="history-context-invert"
+                                    >
+                                        <i class="fas fa-retweet"></i> Invert
+                                    </button>
+                                </div>
+                            </div>
+                            <div
+                                id="history-context-message-list"
+                                class="border rounded p-2 flex-grow-1"
+                                style="overflow-y: auto"
                             >
-                                <i class="fas fa-save"></i> Save Context
-                                Selection
-                            </button>
-                            <small class="text-muted ms-2"
-                                >Selection is saved to the session's
-                                metadata.</small
-                            >
+                                <p class="text-muted p-2">
+                                    Load a session to manage its history
+                                    context...
+                                </p>
+                            </div>
+                            <div class="mt-2">
+                                <button
+                                    class="btn btn-primary btn-sm"
+                                    id="btn-save-context-selection"
+                                >
+                                    <i class="fas fa-save"></i> Save Context
+                                    Selection
+                                </button>
+                                <small class="text-muted ms-2"
+                                    >Selection is saved to the session's
+                                    metadata.</small
+                                >
+                            </div>
                         </div>
                     </div>
                 </div>
-                <!-- End: New Nested Tab Structure -->
+
+                <!-- UI Managed UI (hidden by default) -->
+                <div
+                    id="ui-managed-context-ui"
+                    class="d-flex flex-column h-100"
+                    style="display: none"
+                >
+                    <h5>
+                        <i class="fas fa-edit"></i> Prompt Workbench (UI
+                        Managed)
+                    </h5>
+                    <p class="small text-muted">
+                        In this mode, the text below is sent directly to the
+                        LLM, bypassing LLMCore's context assembly. Your message
+                        from the main chat input will still be saved to history.
+                    </p>
+                    <textarea
+                        id="prompt-workbench-textarea"
+                        class="form-control flex-grow-1"
+                        style="font-family: monospace; font-size: 0.9em"
+                        placeholder="Enter your full, raw prompt here..."
+                    ></textarea>
+                    <div
+                        id="prompt-workbench-token-count"
+                        class="text-end text-muted small mt-1"
+                    >
+                        Tokens: 0
+                    </div>
+                </div>
+                <!-- END: New Context Mode Toggle and UI containers -->
             </div>
             <div
                 class="tab-pane fade"

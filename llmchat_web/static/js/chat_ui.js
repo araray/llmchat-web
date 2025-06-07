@@ -3,7 +3,8 @@
 /**
  * @file chat_ui.js
  * @description Handles chat message UI, sending messages, SSE, and per-message actions.
- * Now also handles the 'rag_results' SSE event to trigger the display of retrieved RAG documents.
+ * Now also handles the 'rag_results' SSE event and sending data from the
+ * new "UI Managed" Prompt Workbench mode.
  * Depends on utils.js, rag_ui.js, and accesses global state from main_controller.js.
  */
 
@@ -51,10 +52,10 @@ function appendMessageToChat(
 
 /**
  * Sends the chat message to the backend and handles streaming response.
- * Gathers the current message inclusion map from the UI and includes it in the request.
- * Now processes `rag_results` events from the SSE stream.
- * Accesses global currentLlmSessionId and stagedContextItems.
- * Calls global updateContextUsageDisplay and displayRetrievedDocuments.
+ * It now checks for the context management mode ('LLMCore' vs 'UI') and constructs
+ * the payload accordingly.
+ * Accesses global variables: currentLlmSessionId, stagedContextItems.
+ * Calls global functions: updateContextUsageDisplay, displayRetrievedDocuments.
  */
 async function sendMessage() {
   const messageText = $("#chat-input").val().trim();
@@ -88,33 +89,60 @@ async function sendMessage() {
     displayRetrievedDocuments([]); // Calling with empty array will clear the display
   }
 
-  // Gather Message Inclusion Map
-  const messageInclusionMap = {};
-  let mapIsRelevant = false;
-  $("#history-context-message-list .form-check-input").each(function () {
-    const messageId = $(this).data("message-id");
-    const isIncluded = $(this).is(":checked");
-    if (messageId) {
-      messageInclusionMap[messageId] = isIncluded;
-      mapIsRelevant = true;
-    }
-  });
-  console.log(
-    "CHAT_UI: Constructed message inclusion map to send:",
-    messageInclusionMap,
-  );
+  // --- Rationale Block: FEAT-03 - Frontend Payload Logic ---
+  // Pre-state: The sendMessage function always constructed a payload with
+  //            `active_context_specification` and `message_inclusion_map`.
+  // Limitation: This did not account for the new "UI Managed" mode where a raw
+  //             prompt should be sent instead.
+  // Decision Path: A conditional check on the `#context-mode-toggle` switch is
+  //                introduced.
+  //                - If checked (UI Managed): The payload will include the
+  //                  `raw_prompt_workbench_content` key with the content from the
+  //                  `#prompt-workbench-textarea`.
+  //                - If unchecked (LLMCore Managed): The payload will be constructed
+  //                  as before, with `active_context_specification` and
+  //                  `message_inclusion_map`.
+  // Post-state: The frontend now sends the correct payload to the backend based
+  //             on the user-selected context management mode.
+  // --- End Rationale Block ---
+
+  const isUIManaged = $("#context-mode-toggle").is(":checked");
+  const payload = {
+    message: messageText,
+    session_id: window.currentLlmSessionId,
+    stream: true,
+  };
+
+  if (isUIManaged) {
+    console.log("CHAT_UI: Sending message in UI Managed mode.");
+    payload.raw_prompt_workbench_content = $(
+      "#prompt-workbench-textarea",
+    ).val();
+  } else {
+    console.log("CHAT_UI: Sending message in LLMCore Managed mode.");
+    const messageInclusionMap = {};
+    let mapIsRelevant = false;
+    $("#history-context-message-list .form-check-input").each(function () {
+      const messageId = $(this).data("message-id");
+      const isIncluded = $(this).is(":checked");
+      if (messageId) {
+        messageInclusionMap[messageId] = isIncluded;
+        mapIsRelevant = true;
+      }
+    });
+    payload.active_context_specification = window.stagedContextItems;
+    payload.message_inclusion_map = mapIsRelevant ? messageInclusionMap : null;
+    console.log(
+      "CHAT_UI: Constructed message inclusion map to send:",
+      messageInclusionMap,
+    );
+  }
 
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: messageText,
-        session_id: window.currentLlmSessionId,
-        stream: true,
-        active_context_specification: window.stagedContextItems,
-        message_inclusion_map: mapIsRelevant ? messageInclusionMap : null,
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
