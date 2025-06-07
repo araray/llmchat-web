@@ -52,7 +52,7 @@ from llmcore.models import Message as LLMCoreMessage, ChatSession as LLMCoreChat
 try:
     APP_VERSION = version("llmchat-web")
 except PackageNotFoundError:
-    APP_VERSION = "0.5.4-dev"
+    APP_VERSION = "0.6.1" # Updated version
     logging.getLogger("llmchat_web_startup").info(
         f"llmchat-web package not found, using fallback version: {APP_VERSION}."
     )
@@ -163,52 +163,76 @@ def log_session_info_before_request():
 
 # --- Async to Sync Wrapper for Flask Routes ---
 def async_to_sync_in_flask(f: Callable[..., Coroutine[Any, Any, Any]]) -> Callable[..., Any]:
+    """
+    A decorator that allows running an async function from a synchronous Flask route.
+    It uses `asyncio.run()`, which is the standard and robust way to manage a top-level
+    async entry point. It creates a new event loop for the call and ensures it's
+    properly closed, avoiding "Event loop is closed" errors with underlying
+    libraries that use stateful async clients (like httpx used by google-genai).
+    """
     @wraps(f)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        loop: Optional[asyncio.AbstractEventLoop] = None; created_loop = False
-        try: loop = asyncio.get_running_loop(); logger.debug("Found existing running event loop for async_to_sync_in_flask.")
+        try:
+            # Check if an event loop is already running in this thread.
+            # If so, we're in a nested async context which is complex.
+            # The asyncio.run() call below would fail. This indicates a
+            # different server setup (like uvicorn workers) where this
+            # wrapper might not even be needed. For standard Flask/Gunicorn sync
+            # workers, this will raise a RuntimeError as intended.
+            asyncio.get_running_loop()
+            # If a loop is running, this wrapper's approach is not suitable.
+            # This would require a more complex solution like `run_coroutine_threadsafe`
+            # if the server is running its own loop in the main thread.
+            # However, for this application's typical setup, we assume no loop is running.
+            raise RuntimeError("async_to_sync_in_flask should not be used in an already-running event loop.")
         except RuntimeError:
-            logger.debug("No running event loop, creating new one for async_to_sync_in_flask.")
-            loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop); created_loop = True
-        if loop is None: raise RuntimeError("Failed to obtain an event loop for an async operation.")
-        try: return loop.run_until_complete(f(*args, **kwargs))
-        finally:
-            if created_loop and not loop.is_closed():
-                logger.debug("Closing event loop created by async_to_sync_in_flask.")
-                try:
-                    async def _shutdown_loop_tasks(current_loop: asyncio.AbstractEventLoop):
-                        tasks = [t for t in asyncio.all_tasks(loop=current_loop) if t is not asyncio.current_task(loop=current_loop)]
-                        if tasks: logger.debug(f"Cancelling {len(tasks)} outstanding tasks in created loop."); [task.cancel() for task in tasks]; await asyncio.gather(*tasks, return_exceptions=True)
-                        logger.debug("Shutting down async generators in created loop."); await current_loop.shutdown_asyncgens()
-                    loop.run_until_complete(_shutdown_loop_tasks(loop))
-                except Exception as e_shutdown: logger.error(f"Error during shutdown of tasks/asyncgens in created loop: {e_shutdown}")
-                finally: loop.close(); logger.debug("Event loop created by wrapper closed.");
-                if asyncio.get_event_loop_policy().get_event_loop() is loop: asyncio.set_event_loop(None)
-            elif not created_loop: logger.debug("Not closing event loop as it was pre-existing.")
+            # No event loop is running in the current thread, so we can safely
+            # use asyncio.run() to execute our coroutine.
+            return asyncio.run(f(*args, **kwargs))
     return wrapper
 
 # --- run_async_generator_synchronously ---
 def run_async_generator_synchronously(async_gen_func: Callable[..., AsyncGenerator[str, None]], *args: Any, **kwargs: Any) -> Any:
+    """
+    Runs an asynchronous generator function synchronously from a synchronous context.
+    This is necessary for streaming responses in Flask with `stream_with_context`.
+    It creates and manages a dedicated event loop for the generator's lifecycle.
+    """
     utility_logger = logging.getLogger("llmchat_web.utils.async_gen_sync_runner")
-    loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     utility_logger.debug(f"Created new event loop for run_async_generator_synchronously of {async_gen_func.__name__}")
     try:
         async_gen = async_gen_func(*args, **kwargs)
         while True:
-            try: item = loop.run_until_complete(async_gen.__anext__()); yield item
-            except StopAsyncIteration: utility_logger.debug(f"Async generator {async_gen_func.__name__} completed."); break
-            except Exception as e_inner: utility_logger.error(f"Error during iteration of async generator {async_gen_func.__name__}: {e_inner}", exc_info=True); break
+            try:
+                item = loop.run_until_complete(async_gen.__anext__())
+                yield item
+            except StopAsyncIteration:
+                utility_logger.debug(f"Async generator {async_gen_func.__name__} completed.")
+                break
+            except Exception as e_inner:
+                utility_logger.error(f"Error during iteration of async generator {async_gen_func.__name__}: {e_inner}", exc_info=True)
+                break
     finally:
         utility_logger.debug(f"Cleaning up event loop for run_async_generator_synchronously of {async_gen_func.__name__}.")
         try:
-            async def _shutdown_loop_tasks(current_loop: asyncio.AbstractEventLoop):
-                tasks = [t for t in asyncio.all_tasks(loop=current_loop) if t is not asyncio.current_task(loop=current_loop)]
-                if tasks: utility_logger.debug(f"Cancelling {len(tasks)} outstanding tasks in sync generator's loop for {async_gen_func.__name__}."); [task.cancel() for task in tasks]; await asyncio.gather(*tasks, return_exceptions=True)
-                utility_logger.debug(f"Shutting down async generators in sync generator's loop for {async_gen_func.__name__}."); await current_loop.shutdown_asyncgens()
-            loop.run_until_complete(_shutdown_loop_tasks(loop))
-        except Exception as e_shutdown: utility_logger.error(f"Error during shutdown of tasks/asyncgens in sync generator's loop for {async_gen_func.__name__}: {e_shutdown}")
-        finally: loop.close(); utility_logger.debug(f"Event loop for {async_gen_func.__name__} closed.");
-        if asyncio.get_event_loop_policy().get_event_loop() is loop: asyncio.set_event_loop(None)
+            tasks = [t for t in asyncio.all_tasks(loop=loop) if t is not asyncio.current_task(loop=loop)]
+            if tasks:
+                utility_logger.debug(f"Cancelling {len(tasks)} outstanding tasks in sync generator's loop for {async_gen_func.__name__}.")
+                for task in tasks:
+                    task.cancel()
+                loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+            utility_logger.debug(f"Shutting down async generators in sync generator's loop for {async_gen_func.__name__}.")
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception as e_shutdown:
+            utility_logger.error(f"Error during shutdown of tasks/asyncgens in sync generator's loop for {async_gen_func.__name__}: {e_shutdown}")
+        finally:
+            if not loop.is_closed():
+                loop.close()
+                utility_logger.debug(f"Event loop for {async_gen_func.__name__} closed.")
+            if asyncio.get_event_loop_policy().get_event_loop() is loop:
+                asyncio.set_event_loop(None)
 
 # --- Session Helper Functions ---
 def get_current_web_session_id() -> Optional[str]:
