@@ -6,7 +6,8 @@
  * Now also handles the 'rag_results' SSE event, sending data from the
  * "UI Managed" Prompt Workbench mode, and adding action buttons to user messages.
  * This version includes fixes for preserving action buttons during streaming and
- * triggers real-time token estimation on input.
+ * triggers real-time token estimation on input for both the chat input and the
+ * full context preview.
  * Depends on utils.js, rag_ui.js, session_api.js and accesses global state from main_controller.js.
  */
 
@@ -78,9 +79,12 @@ async function sendMessage() {
   const userMessageElementId = appendMessageToChat(messageText, "user");
 
   $("#chat-input").val("");
-  // After clearing the input, reset the token estimate display to zero.
+  // After clearing the input, reset the token estimate display and full context preview.
   if (typeof updateChatInputTokenEstimate === "function") {
     updateChatInputTokenEstimate();
+  }
+  if (typeof updateFullContextPreview === "function") {
+    updateFullContextPreview();
   }
 
   const agentMessageElementId = `agent-msg-${Date.now()}`;
@@ -230,7 +234,8 @@ async function sendMessage() {
 
 /**
  * Initializes event listeners related to chat messages. This now includes
- * an 'input' event listener to trigger real-time token estimation.
+ * an 'input' event listener to trigger real-time token estimation for both
+ * the local input and the full context preview.
  */
 function initChatEventListeners() {
   $("#send-chat-message").on("click", function () {
@@ -241,6 +246,10 @@ function initChatEventListeners() {
   $("#chat-input").on("input", function () {
     if (typeof updateChatInputTokenEstimate === "function") {
       updateChatInputTokenEstimate();
+    }
+    // Also trigger the full context preview, as the user's query is part of the context
+    if (typeof updateFullContextPreview === "function") {
+      updateFullContextPreview();
     }
   });
 
