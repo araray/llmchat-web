@@ -4,7 +4,8 @@
  * @file rag_ui.js
  * @description Handles RAG (Retrieval Augmented Generation) UI controls,
  * API calls for RAG settings, collections, direct search, and rendering results.
- * Now includes the function to display RAG results from a chat SSE stream.
+ * Now includes the function to display RAG results from a chat SSE stream and
+ * triggers real-time full context token updates when RAG settings are changed.
  * Depends on utils.js for helper functions (escapeHtml, showToast) and
  * accesses global variables from main_controller.js (currentRagSettings, currentLlmSessionId).
  */
@@ -116,7 +117,8 @@ function updateRagControlsState() {
 
 /**
  * Sends updated RAG settings (from global `currentRagSettings`) to the backend.
- * Uses global `showToast`.
+ * Also triggers a full context preview update.
+ * Uses global `showToast` and `updateFullContextPreview`.
  */
 function sendRagSettingsUpdate() {
   const ragSettings = window.currentRagSettings || {};
@@ -133,6 +135,11 @@ function sendRagSettingsUpdate() {
     kValue: ragSettings.kValue || 3,
     filter: filterToSend,
   };
+
+  // Trigger the full context preview update immediately after changing RAG settings.
+  if (typeof updateFullContextPreview === "function") {
+    updateFullContextPreview();
+  }
 
   $.ajax({
     url: "/api/rag/settings/update",
