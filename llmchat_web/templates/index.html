@@ -327,6 +327,32 @@ block head_extra %}
         padding-bottom: 0.25rem;
     }
 
+    /* RAG Inspector styling */
+    #rag-retrieved-docs-display .list-group-item {
+        background-color: #3a3f44;
+        border-color: #495057;
+        color: #dee2e6;
+        padding: 0.5rem 0.75rem;
+    }
+    #rag-retrieved-docs-display h6 {
+        color: #88c0d0; /* Nord cyan */
+        margin-bottom: 0.25rem;
+        border: none;
+    }
+    #rag-retrieved-docs-display pre {
+        background-color: #2c3034;
+        padding: 5px;
+        border-radius: 3px;
+        max-height: 80px;
+        overflow-y: auto;
+        font-size: 0.8em;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+    #rag-retrieved-docs-display .rag-doc-actions .btn {
+        font-size: 0.75rem;
+    }
+
     /* Direct RAG Search Results Modal */
     #directRagSearchResultsModal .modal-body {
         font-size: 0.85rem;
@@ -915,6 +941,24 @@ block head_extra %}
                     Uses current RAG settings (collection, K, filter) for the
                     search. Results will appear in a modal.
                 </p>
+
+                <!-- Start: New RAG Results Display Area -->
+                <hr class="my-3" />
+                <h6>
+                    <i class="fas fa-book-open"></i> Retrieved Documents for
+                    Last Chat
+                </h6>
+                <div
+                    id="rag-retrieved-docs-display"
+                    class="border rounded p-2 d-none"
+                    style="max-height: 250px; overflow-y: auto"
+                >
+                    <p class="text-muted small">
+                        After a RAG-enabled chat, retrieved documents will be
+                        displayed here.
+                    </p>
+                </div>
+                <!-- End: New RAG Results Display Area -->
             </div>
         </div>
     </main>
@@ -1583,7 +1627,7 @@ Loading logs...</pre
     document.addEventListener("DOMContentLoaded", function () {
         var triggerTabList = [].slice.call(
             document.querySelectorAll(
-                "#mainContentTabs button, #bottomControlTabs button, #ingestionTypeTabs button, #contextSubTabs button", // Added contextSubTabs
+                "#mainContentTabs button, #bottomControlTabs button, #ingestionTypeTabs button, #contextSubTabs button",
             ),
         );
         triggerTabList.forEach(function (triggerEl) {
