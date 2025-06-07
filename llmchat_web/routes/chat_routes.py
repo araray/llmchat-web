@@ -143,6 +143,7 @@ def api_chat_route() -> Any:
     session_id_from_request: Optional[str] = data.get("session_id", get_current_web_session_id())
     stream_requested: bool = data.get("stream", True)
     active_context_spec_from_js: List[Dict[str, Any]] = data.get('active_context_specification', [])
+    message_inclusion_map: Optional[Dict[str, bool]] = data.get('message_inclusion_map', None)
 
     # --- Log Flask session state at the beginning of chat request handling ---
     if logger.isEnabledFor(logging.DEBUG):
@@ -187,7 +188,8 @@ def api_chat_route() -> Any:
         f"RAG: {flask_session.get('rag_enabled', False)}, Collection: {flask_session.get('rag_collection_name')}, K: {flask_session.get('rag_k_value')}, Filter: {flask_session.get('rag_filter')}. "
         f"SystemMsg: '{str(flask_session.get('system_message', ''))[:50]}...'. "
         f"PromptValues: {flask_session.get('prompt_template_values', {})}. "
-        f"Staged items: {len(explicitly_staged_items)}. Stream: {stream_requested}."
+        f"Staged items: {len(explicitly_staged_items)}. Stream: {stream_requested}. "
+        f"MessageInclusionMap: {'Present' if message_inclusion_map else 'Not Present'}"
     )
 
     llm_core_params: Dict[str, Any] = {
@@ -197,7 +199,8 @@ def api_chat_route() -> Any:
         "enable_rag": flask_session.get('rag_enabled', False), "rag_collection_name": flask_session.get('rag_collection_name'),
         "rag_retrieval_k": flask_session.get('rag_k_value'), "rag_metadata_filter": flask_session.get('rag_filter'),
         "prompt_template_values": flask_session.get('prompt_template_values', {}),
-        "explicitly_staged_items": explicitly_staged_items, "stream": stream_requested
+        "explicitly_staged_items": explicitly_staged_items, "stream": stream_requested,
+        "message_inclusion_map": message_inclusion_map
     }
 
     if stream_requested:
