@@ -3,6 +3,7 @@
 Flask routes for session management in the llmchat-web application.
 Handles listing, creating, loading, and deleting chat sessions,
 as well as operations on messages within sessions.
+It also includes an endpoint for updating client-specific session metadata.
 """
 import logging
 import uuid # For generating new session IDs
@@ -317,5 +318,57 @@ async def delete_message_from_session_route(session_id: str, message_id: str) ->
     except Exception as e_unexp:
         logger.error(f"Unexpected error deleting message {message_id} from session {session_id}: {e_unexp}", exc_info=True)
         return jsonify({"error": "An unexpected server error occurred while deleting the message."}), 500
+
+
+@session_bp.route("/<session_id>/metadata", methods=["POST"])
+@async_to_sync_in_flask
+async def update_session_metadata_route(session_id: str) -> Any:
+    """
+    Updates a client-specific key in a persistent session's metadata.
+    This allows a client application (like the web UI) to store its
+    own state within the session object.
+
+    Expects JSON payload: `{"client_data": {...}, "client_key": "optional_key_name"}`
+    """
+    if not llmcore_instance:
+        logger.error(f"Attempted to update metadata for session {session_id}, but LLM service is not available.")
+        return jsonify({"error": "LLM service not available."}), 503
+
+    data = request.json
+    if not data or "client_data" not in data:
+        logger.warning(f"Update session metadata for {session_id} called without 'client_data' in payload.")
+        return jsonify({"error": "Missing 'client_data' in request payload."}), 400
+
+    client_data = data["client_data"]
+    # Default key is 'client_data', allowing the client to nest its data cleanly.
+    client_key = data.get("client_key", "client_data")
+
+    try:
+        logger.info(f"Updating metadata for session '{session_id}' with key '{client_key}'.")
+        success = await llmcore_instance.update_session_metadata(
+            session_id=session_id,
+            client_metadata=client_data,
+            client_key=client_key
+        )
+
+        if success:
+            logger.info(f"Successfully updated metadata for session '{session_id}'.")
+            return jsonify({"message": f"Metadata for session '{session_id}' updated successfully."})
+        else:
+            # This 'else' case is reached if llmcore.update_session_metadata returns False,
+            # which happens if the session was not found.
+            logger.warning(f"Failed to update metadata for session '{session_id}'. Session may not have been found.")
+            return jsonify({"error": "Session not found or update failed."}), 404
+    except SessionNotFoundError:
+         # This handles cases where get_session within update_session_metadata might raise
+         logger.warning(f"Session '{session_id}' not found when updating metadata.")
+         return jsonify({"error": "Session not found."}), 404
+    except LLMCoreError as e:
+        logger.error(f"LLMCore error updating metadata for session {session_id}: {e}", exc_info=True)
+        return jsonify({"error": f"Failed to update session metadata: {str(e)}"}), 500
+    except Exception as e_unexp:
+        logger.error(f"Unexpected error updating metadata for session {session_id}: {e_unexp}", exc_info=True)
+        return jsonify({"error": "An unexpected server error occurred."}), 500
+
 
 logger.info("Session management routes defined on session_bp.")
