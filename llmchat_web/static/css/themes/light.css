@@ -1,0 +1,44 @@
+/* llmchat_web/static/css/themes/light.css */
+/*
+  This file defines the CSS variables for the light theme.
+  It overrides the default dark theme variables set in custom.css.
+*/
+
+:root {
+    /* Color Palette - Light Theme */
+    --bg-primary: #f8f9fa; /* Lighter page background */
+    --bg-secondary: #ffffff; /* White for main content areas */
+    --bg-tertiary: #e9ecef; /* Slightly darker grey for bars/headers */
+    --bg-quaternary: #f1f3f5; /* Sidebar background */
+    --bg-input: #ffffff; /* White input backgrounds */
+    --bg-element: #f1f3f5; /* Background for items like workspace entries */
+    --bg-element-hover: #dee2e6; /* Hover color for elements */
+
+    --text-primary: #212529; /* Dark text for readability */
+    --text-secondary: #495057; /* Slightly lighter dark text */
+    --text-muted: #6c757d;
+    --text-on-accent: #ffffff; /* White text on colored buttons/messages */
+    --text-placeholder: #6c757d;
+    --text-info: #0c5460; /* Darker cyan for info text */
+    --text-link: #0d6efd;
+
+    --border-primary: #dee2e6; /* Standard light theme border color */
+    --border-secondary: #f8f9fa; /* For borders against the lightest background */
+
+    --accent-primary: #0d6efd; /* Bootstrap Primary Blue, works on light bg */
+    --accent-user-message-bg: #0d6efd; /* User message bubble color */
+    --accent-agent-message-bg: #e9ecef; /* Agent message bubble color */
+    --accent-success: #198754;
+    --accent-info: #0dcaf0;
+    --accent-warning: #ffc107;
+    --accent-danger: #dc3545;
+    --accent-badge-success-bg: #198754;
+    --accent-badge-warning-bg: #ffc107;
+    --accent-badge-danger-bg: #dc3545;
+    --accent-badge-info-bg: #e9ecef; /* Light grey for info badge bg */
+}
+
+/* Specific overrides if needed for light theme, e.g., for inputs to have a border */
+.bottom-control-bar .form-check-input {
+    background-color: var(--bg-tertiary);
+}
