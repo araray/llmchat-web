@@ -4,12 +4,103 @@
  * @file context_manager_ui.js
  * @description Handles UI logic for the Context Manager tab, including workspace items,
  * active context specification, history context selection, and context preview.
- * Depends on utils.js for helper functions (escapeHtml, showToast) and
- * accesses/modifies global variables from main_controller.js (currentLlmSessionId, stagedContextItems).
+ * This version adds support for the "UI Managed" Prompt Workbench mode.
+ * Depends on utils.js and accesses/modifies global state from main_controller.js.
  */
 
+// Debounce timer for token estimation to avoid excessive API calls
+let tokenEstimateDebounceTimer;
+
 // =================================================================================
-// SECTION: Workspace & Staging Management
+// SECTION: UI Mode Switching (LLMCore Managed vs. UI Managed)
+// =================================================================================
+
+/**
+ * Toggles the visibility of UI sections based on the selected context management mode.
+ */
+function switchContextManagerMode() {
+  const isUIManaged = $("#context-mode-toggle").is(":checked");
+  console.log(`CTX_MAN_UI: Switching context mode. UI Managed: ${isUIManaged}`);
+
+  if (isUIManaged) {
+    $("#llmcore-managed-context-ui").hide();
+    $("#ui-managed-context-ui").show();
+    updatePromptWorkbenchTokenEstimate(); // Initial token count
+  } else {
+    $("#ui-managed-context-ui").hide();
+    $("#llmcore-managed-context-ui").show();
+    // Refresh the LLMCore managed view if it was hidden
+    if ($("#workspace-subtab-btn").hasClass("active")) {
+      fetchAndDisplayWorkspaceItems();
+      renderStagedContextItems();
+    } else if ($("#history-subtab-btn").hasClass("active")) {
+      fetchAndDisplayHistoryContext();
+    }
+  }
+}
+
+// =================================================================================
+// SECTION: Prompt Workbench (UI Managed Mode)
+// =================================================================================
+
+/**
+ * Estimates the token count for the content in the Prompt Workbench.
+ * It sends the text to the backend's token estimation endpoint and updates the UI.
+ * This function is debounced to prevent API calls on every keystroke.
+ */
+function updatePromptWorkbenchTokenEstimate() {
+  clearTimeout(tokenEstimateDebounceTimer);
+  tokenEstimateDebounceTimer = setTimeout(async () => {
+    const text = $("#prompt-workbench-textarea").val();
+    const $tokenDisplay = $("#prompt-workbench-token-count");
+
+    if (!text) {
+      $tokenDisplay.text("Tokens: 0");
+      return;
+    }
+
+    // Use globally managed provider/model names
+    const providerName = window.currentLlmSettings?.providerName;
+    const modelName = window.currentLlmSettings?.modelName;
+
+    if (!providerName) {
+      $tokenDisplay.text("Tokens: (select provider)");
+      return;
+    }
+
+    $tokenDisplay.text("Tokens: Calculating...");
+
+    try {
+      const response = await fetch("/api/utils/estimate_tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: text,
+          provider_name: providerName,
+          model_name: modelName,
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || "Failed to fetch token count");
+      }
+
+      const data = await response.json();
+      $tokenDisplay.text(`Tokens: ~${data.token_count}`);
+    } catch (error) {
+      console.error(
+        "CTX_MAN_UI: Error estimating prompt workbench tokens:",
+        error,
+      );
+      $tokenDisplay.text("Tokens: Error");
+      showToast("Token Count Error", error.message, "danger");
+    }
+  }, 300); // 300ms debounce delay
+}
+
+// =================================================================================
+// SECTION: Workspace & Staging Management (LLMCore Managed Mode)
 // =================================================================================
 
 /**
@@ -71,6 +162,14 @@ function fetchAndDisplayWorkspaceItems() {
                 "btn btn-sm btn-outline-primary me-1 btn-stage-this-workspace-item",
               title: "Stage for Active Context",
             }).html('<i class="fas fa-arrow-right fa-xs"></i> Stage'),
+          );
+          // New button to add content to the prompt workbench
+          $actions.append(
+            $("<button>", {
+              class:
+                "btn btn-sm btn-outline-secondary me-1 btn-add-to-workbench",
+              title: "Add to Prompt Workbench",
+            }).html('<i class="fas fa-file-import fa-xs"></i> To Workbench'),
           );
           $actions.append(
             $("<button>", {
@@ -248,6 +347,7 @@ function renderHistoryContextList(messages, messageInclusionMap = {}) {
     const $itemDiv = $("<div>", {
       class: "form-check history-context-item",
       "data-message-id": msg.id,
+      "data-message-content": msg.content, // Store full content
     });
     const $checkbox = $("<input>", {
       class: "form-check-input",
@@ -261,8 +361,14 @@ function renderHistoryContextList(messages, messageInclusionMap = {}) {
       for: `history-check-${msg.id}`,
       html: `<strong class="${roleClass}">${escapeHtml(msg.role.toUpperCase())}:</strong> ${escapeHtml(contentPreview)}`,
     });
+    // Button to add message content to workbench
+    const $toWorkbenchBtn = $("<button>", {
+      class: "btn btn-sm btn-outline-secondary ms-2 btn-add-to-workbench",
+      title: "Add message content to Prompt Workbench",
+      html: '<i class="fas fa-file-import fa-xs"></i>',
+    });
 
-    $itemDiv.append($checkbox, $label);
+    $itemDiv.append($checkbox, $label, $toWorkbenchBtn);
     $list.append($itemDiv);
   });
   console.log("CTX_MAN_UI: History context list rendered.");
@@ -326,7 +432,7 @@ function renderContextPreviewModal(data) {
     `<h5><i class="fas fa-file-alt"></i> Effective Context for LLM</h5>`,
   );
   $display.append(
-    `<p class="mb-1"><small class="text-muted">LLM Provider: ${escapeHtml(data.provider_name) || "N/A"}, Model: ${escapeHtml(data.model_name) || "N/A"}</small></p>`,
+    `<p class="mb-1"><small class="text-muted">Provider: ${escapeHtml(data.provider_name) || "N/A"}, Model: ${escapeHtml(data.model_name) || "N/A"}</small></p>`,
   );
   $display.append(
     `<p class="mb-1"><small class="text-muted">Max Tokens: ${data.max_tokens_for_model || "N/A"}, Final Token Count: <strong>${data.final_token_count || "N/A"}</strong></small></p>`,
@@ -401,15 +507,27 @@ function renderContextPreviewModal(data) {
  * Initializes event listeners for the Context Manager tab.
  */
 function initContextManagerEventListeners() {
-  // --- Workspace & Staging Event Listeners ---
+  // --- Mode Toggle ---
+  $("#context-mode-toggle").on("change", switchContextManagerMode);
+
+  // --- Prompt Workbench Listener ---
+  $("#prompt-workbench-textarea").on(
+    "input",
+    updatePromptWorkbenchTokenEstimate,
+  );
+
+  // --- LLMCore Managed UI Event Listeners ---
   $("#context-manager-tab-btn").on("shown.bs.tab", function (e) {
-    const targetTabId = $(e.target).attr("id");
-    // This is now the main tab, so we need to check which sub-tab is active
-    if ($("#workspace-subtab-btn").hasClass("active")) {
-      fetchAndDisplayWorkspaceItems();
-      renderStagedContextItems();
-    } else if ($("#history-subtab-btn").hasClass("active")) {
-      fetchAndDisplayHistoryContext();
+    const isUIManaged = $("#context-mode-toggle").is(":checked");
+    if (!isUIManaged) {
+      if ($("#workspace-subtab-btn").hasClass("active")) {
+        fetchAndDisplayWorkspaceItems();
+        renderStagedContextItems();
+      } else if ($("#history-subtab-btn").hasClass("active")) {
+        fetchAndDisplayHistoryContext();
+      }
+    } else {
+      updatePromptWorkbenchTokenEstimate();
     }
   });
 
@@ -422,6 +540,69 @@ function initContextManagerEventListeners() {
   $("#history-subtab-btn").on("shown.bs.tab", function () {
     fetchAndDisplayHistoryContext();
   });
+
+  // ... (existing listeners for workspace, staging, history, preview) ...
+  // The following listeners remain the same as they operate on the LLMCore Managed UI.
+  // A new listener is added for the "Add to Workbench" button.
+
+  $("#workspace-items-list").on("click", ".btn-add-to-workbench", function () {
+    const $itemDiv = $(this).closest(".workspace-item");
+    const itemId = $itemDiv.data("item-id");
+    if (!itemId || !window.currentLlmSessionId) return;
+
+    $.ajax({
+      url: `/api/sessions/${window.currentLlmSessionId}/workspace/items/${itemId}`,
+      type: "GET",
+      dataType: "json",
+      success: function (item) {
+        const currentWorkbenchContent = $("#prompt-workbench-textarea").val();
+        const newContent =
+          (currentWorkbenchContent ? currentWorkbenchContent + "\n\n" : "") +
+          item.content;
+        $("#prompt-workbench-textarea").val(newContent).trigger("input"); // Trigger token update
+        showToast(
+          "Added to Workbench",
+          `Content from item ${itemId} has been added.`,
+          "success",
+        );
+        // Optional: Switch to UI Managed mode if not already active
+        if (!$("#context-mode-toggle").is(":checked")) {
+          $("#context-mode-toggle").prop("checked", true).trigger("change");
+        }
+      },
+      error: function () {
+        showToast(
+          "Error",
+          "Could not fetch item content to add to workbench.",
+          "danger",
+        );
+      },
+    });
+  });
+
+  $("#history-context-message-list").on(
+    "click",
+    ".btn-add-to-workbench",
+    function () {
+      const content = $(this)
+        .closest(".history-context-item")
+        .data("message-content");
+      if (content) {
+        const currentWorkbenchContent = $("#prompt-workbench-textarea").val();
+        const newContent =
+          (currentWorkbenchContent ? currentWorkbenchContent + "\n\n" : "") +
+          content;
+        $("#prompt-workbench-textarea").val(newContent).trigger("input");
+        showToast("Added to Workbench", `Message content added.`, "success");
+        if (!$("#context-mode-toggle").is(":checked")) {
+          $("#context-mode-toggle").prop("checked", true).trigger("change");
+        }
+      }
+    },
+  );
+
+  // ... (All other existing listeners from the previous file version go here) ...
+  // Duplicating them for completeness.
 
   $("#form-add-text-snippet").on("submit", function (e) {
     e.preventDefault();
@@ -680,7 +861,6 @@ function initContextManagerEventListeners() {
     });
   });
 
-  // --- History Context Event Listeners ---
   $("#history-context-select-all").on("click", function () {
     $("#history-context-message-list .form-check-input").prop("checked", true);
   });
@@ -717,7 +897,6 @@ function initContextManagerEventListeners() {
       type: "POST",
       contentType: "application/json",
       data: JSON.stringify({
-        // llmcore expects this nested structure
         client_data: {
           message_inclusion_map: messageInclusionMap,
         },
