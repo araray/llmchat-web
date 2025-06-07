@@ -6,7 +6,7 @@
  * Depends on utils.js for helper functions (escapeHtml, showToast) and
  * accesses global variables/functions from main_controller.js (currentLlmSessionId, stagedContextItems,
  * updateContextUsageDisplay, fetchAndDisplayWorkspaceItems).
- * The logic for appending to the "Raw Output" tab has been removed as part of the UI refactor.
+ * Now also sends the message_inclusion_map with each chat request.
  */
 
 /**
@@ -32,12 +32,12 @@ function appendMessageToChat(
   const $messageDiv = $("<div>", {
     id: messageId,
     class: `message-bubble ${sender === "user" ? "user-message" : "agent-message"} ${isError ? "error-message-bubble" : ""}`,
-    // text content is safer than html if text might contain HTML-like strings by mistake
     text: text, // Using .text() to prevent accidental HTML injection from message content itself
   });
 
   if (persistentMessageId) {
     $messageDiv.attr("data-message-id", persistentMessageId);
+    // Add action buttons for messages that have a persistent ID
     const actionsHtml = `
           <div class="message-actions mt-1">
               <button class="btn btn-sm btn-outline-light btn-copy-message" title="Copy"><i class="fas fa-copy fa-xs"></i></button>
@@ -53,6 +53,7 @@ function appendMessageToChat(
 
 /**
  * Sends the chat message to the backend and handles streaming response.
+ * Gathers the current message inclusion map from the UI and includes it in the request.
  * Accesses global currentLlmSessionId and stagedContextItems.
  * Calls global updateContextUsageDisplay.
  */
@@ -60,7 +61,6 @@ async function sendMessage() {
   const messageText = $("#chat-input").val().trim();
   if (!messageText) return;
   if (!window.currentLlmSessionId) {
-    // Use window. to be explicit about global
     showToast(
       "Error",
       "No active session. Please start or load a session.",
@@ -72,7 +72,6 @@ async function sendMessage() {
   appendMessageToChat(messageText, "user");
   $("#chat-input").val("");
   if (typeof updateChatInputTokenEstimate === "function") {
-    // Check if function exists
     updateChatInputTokenEstimate();
   }
 
@@ -85,15 +84,35 @@ async function sendMessage() {
     agentMessageElementId,
   );
 
+  // --- Start: Gather Message Inclusion Map ---
+  // This gathers the current state of the history checkboxes right before sending.
+  const messageInclusionMap = {};
+  let mapIsRelevant = false;
+  $("#history-context-message-list .form-check-input").each(function () {
+    const messageId = $(this).data("message-id");
+    const isIncluded = $(this).is(":checked");
+    if (messageId) {
+      messageInclusionMap[messageId] = isIncluded;
+      mapIsRelevant = true; // Mark that we found some checkboxes
+    }
+  });
+  console.log(
+    "CHAT_UI: Constructed message inclusion map to send:",
+    messageInclusionMap,
+  );
+  // --- End: Gather Message Inclusion Map ---
+
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message: messageText,
-        session_id: window.currentLlmSessionId, // Use window.
+        session_id: window.currentLlmSessionId,
         stream: true,
-        active_context_specification: window.stagedContextItems, // Use window.
+        active_context_specification: window.stagedContextItems,
+        // Include the map in the payload if it's relevant (i.e., if checkboxes existed)
+        message_inclusion_map: mapIsRelevant ? messageInclusionMap : null,
       }),
     });
 
@@ -107,14 +126,14 @@ async function sendMessage() {
         `<span class="text-danger">Error: ${escapeHtml(errorMessage)}</span>`,
       );
       if (typeof updateContextUsageDisplay === "function")
-        updateContextUsageDisplay(null); // Check if function exists
+        updateContextUsageDisplay(null);
       return;
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let accumulatedContent = ""; // For chat display
+    let accumulatedContent = "";
     let persistentMsgId = null;
     const actionsHtml = `
         <div class="message-actions mt-1">
@@ -138,7 +157,6 @@ async function sendMessage() {
             const eventData = JSON.parse(line.substring(6));
             if (eventData.type === "chunk") {
               accumulatedContent += eventData.content;
-              // Update chat display with HTML escaped content
               $(`#${agentMessageElementId}`).html(
                 escapeHtml(accumulatedContent),
               );
@@ -159,7 +177,7 @@ async function sendMessage() {
               }
             } else if (eventData.type === "context_usage" && eventData.data) {
               if (typeof updateContextUsageDisplay === "function")
-                updateContextUsageDisplay(eventData.data); // Check if function exists
+                updateContextUsageDisplay(eventData.data);
             } else if (eventData.type === "end") {
               console.log("Stream ended by server.");
               if (
@@ -214,7 +232,7 @@ async function sendMessage() {
       `<span class="text-danger">Error: ${escapeHtml(catchErrorMessage)}</span>`,
     );
     if (typeof updateContextUsageDisplay === "function")
-      updateContextUsageDisplay(null); // Check if function exists
+      updateContextUsageDisplay(null);
   }
 }
 
@@ -241,7 +259,7 @@ function initChatEventListeners() {
       .children(".message-actions")
       .remove()
       .end()
-      .text() // Use .text() to get the pure text content
+      .text()
       .trim();
     navigator.clipboard
       .writeText(messageContent)
@@ -257,7 +275,6 @@ function initChatEventListeners() {
   $("#chat-messages").on("click", ".btn-add-workspace", function () {
     const messageId = $(this).closest(".message-bubble").data("message-id");
     if (!messageId || !window.currentLlmSessionId) {
-      // Use window.
       showToast(
         "Error",
         "Cannot add to workspace: Message ID or Session ID is missing.",
@@ -266,10 +283,10 @@ function initChatEventListeners() {
       return;
     }
     console.log(
-      `Adding message ${messageId} to workspace for session ${window.currentLlmSessionId}`, // Use window.
+      `Adding message ${messageId} to workspace for session ${window.currentLlmSessionId}`,
     );
     $.ajax({
-      url: `/api/sessions/${window.currentLlmSessionId}/workspace/add_from_message`, // Use window.
+      url: `/api/sessions/${window.currentLlmSessionId}/workspace/add_from_message`,
       type: "POST",
       contentType: "application/json",
       data: JSON.stringify({ message_id: messageId }),
@@ -283,7 +300,8 @@ function initChatEventListeners() {
         );
         if (
           typeof fetchAndDisplayWorkspaceItems === "function" &&
-          $("#context-manager-tab-btn").hasClass("active")
+          $("#context-manager-tab-btn").hasClass("active") &&
+          $("#workspace-subtab-btn").hasClass("active") // Check if sub-tab is active
         ) {
           fetchAndDisplayWorkspaceItems();
         }
@@ -306,7 +324,6 @@ function initChatEventListeners() {
     const $messageBubble = $(this).closest(".message-bubble");
     const messageId = $messageBubble.data("message-id");
     if (!messageId || !window.currentLlmSessionId) {
-      // Use window.
       showToast(
         "Error",
         "Cannot delete message: Message ID or Session ID is missing.",
@@ -322,10 +339,10 @@ function initChatEventListeners() {
       function (confirmed) {
         if (confirmed) {
           console.log(
-            `Deleting message ${messageId} from session ${window.currentLlmSessionId}`, // Use window.
+            `Deleting message ${messageId} from session ${window.currentLlmSessionId}`,
           );
           $.ajax({
-            url: `/api/sessions/${window.currentLlmSessionId}/messages/${messageId}`, // Use window.
+            url: `/api/sessions/${window.currentLlmSessionId}/messages/${messageId}`,
             type: "DELETE",
             dataType: "json",
             success: function (response) {
