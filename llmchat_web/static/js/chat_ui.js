@@ -3,10 +3,8 @@
 /**
  * @file chat_ui.js
  * @description Handles chat message UI, sending messages, SSE, and per-message actions.
- * Depends on utils.js for helper functions (escapeHtml, showToast) and
- * accesses global variables/functions from main_controller.js (currentLlmSessionId, stagedContextItems,
- * updateContextUsageDisplay, fetchAndDisplayWorkspaceItems).
- * Now also sends the message_inclusion_map with each chat request.
+ * Now also handles the 'rag_results' SSE event to trigger the display of retrieved RAG documents.
+ * Depends on utils.js, rag_ui.js, and accesses global state from main_controller.js.
  */
 
 /**
@@ -54,8 +52,9 @@ function appendMessageToChat(
 /**
  * Sends the chat message to the backend and handles streaming response.
  * Gathers the current message inclusion map from the UI and includes it in the request.
+ * Now processes `rag_results` events from the SSE stream.
  * Accesses global currentLlmSessionId and stagedContextItems.
- * Calls global updateContextUsageDisplay.
+ * Calls global updateContextUsageDisplay and displayRetrievedDocuments.
  */
 async function sendMessage() {
   const messageText = $("#chat-input").val().trim();
@@ -84,8 +83,12 @@ async function sendMessage() {
     agentMessageElementId,
   );
 
-  // --- Start: Gather Message Inclusion Map ---
-  // This gathers the current state of the history checkboxes right before sending.
+  // Clear previous RAG results from the UI at the start of a new chat turn
+  if (typeof displayRetrievedDocuments === "function") {
+    displayRetrievedDocuments([]); // Calling with empty array will clear the display
+  }
+
+  // Gather Message Inclusion Map
   const messageInclusionMap = {};
   let mapIsRelevant = false;
   $("#history-context-message-list .form-check-input").each(function () {
@@ -93,14 +96,13 @@ async function sendMessage() {
     const isIncluded = $(this).is(":checked");
     if (messageId) {
       messageInclusionMap[messageId] = isIncluded;
-      mapIsRelevant = true; // Mark that we found some checkboxes
+      mapIsRelevant = true;
     }
   });
   console.log(
     "CHAT_UI: Constructed message inclusion map to send:",
     messageInclusionMap,
   );
-  // --- End: Gather Message Inclusion Map ---
 
   try {
     const response = await fetch("/api/chat", {
@@ -111,7 +113,6 @@ async function sendMessage() {
         session_id: window.currentLlmSessionId,
         stream: true,
         active_context_specification: window.stagedContextItems,
-        // Include the map in the payload if it's relevant (i.e., if checkboxes existed)
         message_inclusion_map: mapIsRelevant ? messageInclusionMap : null,
       }),
     });
@@ -178,6 +179,16 @@ async function sendMessage() {
             } else if (eventData.type === "context_usage" && eventData.data) {
               if (typeof updateContextUsageDisplay === "function")
                 updateContextUsageDisplay(eventData.data);
+            } else if (eventData.type === "rag_results") {
+              // --- Start: RAG Results Handling ---
+              console.log(
+                "CHAT_UI: Received rag_results event:",
+                eventData.documents,
+              );
+              if (typeof displayRetrievedDocuments === "function") {
+                displayRetrievedDocuments(eventData.documents || []);
+              }
+              // --- End: RAG Results Handling ---
             } else if (eventData.type === "end") {
               console.log("Stream ended by server.");
               if (
