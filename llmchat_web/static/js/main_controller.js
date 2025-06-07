@@ -5,7 +5,8 @@
  * @description Main JavaScript controller for the llmchat-web interface.
  * This file initializes various UI modules and handles global state management,
  * initial status fetching, session list display, and other top-level UI interactions.
- * This version includes fixes for session creation UI and theme management.
+ * This version includes fixes for session creation UI and theme management, and corrects
+ * the logic for displaying chat history when a session is loaded.
  *
  * Global state variables (e.g., window.currentLlmSettings) are initialized in utils.js.
  * This script populates them based on backend status and user interactions.
@@ -346,21 +347,76 @@ $(document).ready(function () {
           showToast("Error", "Invalid session data received.", "danger");
           return;
         }
+
+        // --- START: FIX for Step 1.4 ---
+        // Rationale: Instead of a full, destructive UI reset with fetchAndUpdateInitialStatus(),
+        // perform a targeted update of global state and UI components based on the loaded session's data.
+        // This preserves the chat message history which is rendered right after this block.
+
+        // 1. Update global state from the session's applied settings
         window.currentLlmSessionId = response.session_data.id;
+        const settings = response.applied_settings;
+        window.currentLlmSettings = {
+          providerName: settings.current_provider_name,
+          modelName: settings.current_model_name,
+          systemMessage: settings.system_message,
+        };
+        window.currentRagSettings = {
+          enabled: settings.rag_enabled,
+          collectionName: settings.rag_collection_name,
+          kValue: settings.k_value,
+          filter: settings.rag_filter,
+        };
+        window.currentPromptTemplateValues = settings.prompt_template_values;
+        window.stagedContextItems = []; // Clear staged items when loading a session
+
+        // 2. Enable chat panel
         updateChatPanelState(true);
 
+        // 3. Render the chat message history
         $("#chat-messages").empty();
         if (
           response.session_data.messages &&
           response.session_data.messages.length > 0
         ) {
           response.session_data.messages.forEach((msg) => {
-            if (typeof appendMessageToChat === "function")
+            if (typeof appendMessageToChat === "function") {
               appendMessageToChat(msg.content, msg.role, false, msg.id);
+            }
           });
+        } else {
+          $("#chat-messages").append(
+            '<p class="text-muted text-center small p-3">This session is empty.</p>',
+          );
         }
-        // Reload all settings and session list to reflect the loaded session's state
-        fetchAndUpdateInitialStatus();
+
+        // 4. Update all UI components to reflect the new global state
+        $("#status-provider").text(
+          window.currentLlmSettings.providerName || "N/A",
+        );
+        $("#status-model").text(window.currentLlmSettings.modelName || "N/A");
+        if (typeof updateRagControlsState === "function")
+          updateRagControlsState();
+        if (typeof fetchAndPopulateRagCollections === "function")
+          fetchAndPopulateRagCollections();
+        if (typeof fetchAndPopulateLlmProviders === "function")
+          fetchAndPopulateLlmProviders();
+        if (typeof fetchAndDisplaySystemMessage === "function")
+          fetchAndDisplaySystemMessage();
+        if (typeof fetchAndDisplayPromptTemplateValues === "function")
+          fetchAndDisplayPromptTemplateValues();
+        if (typeof renderStagedContextItems === "function")
+          renderStagedContextItems();
+        if (typeof updateContextUsageDisplay === "function")
+          updateContextUsageDisplay(null); // Reset context usage until next turn
+
+        // 5. Refresh the session list to correctly highlight the newly active session
+        fetchAndDisplaySessions();
+
+        console.log(
+          `MAIN_CTRL: Successfully loaded session ${response.session_data.id} and updated UI.`,
+        );
+        // --- END: FIX for Step 1.4 ---
       })
       .fail(function () {
         showToast("Error", "Failed to load session.", "danger");
@@ -389,7 +445,16 @@ $(document).ready(function () {
             );
             if (window.currentLlmSessionId === sessionIdToDelete) {
               window.currentLlmSessionId = null;
-              fetchAndUpdateInitialStatus();
+              $("#chat-messages")
+                .empty()
+                .append(
+                  '<div class="message-bubble agent-message">Session deleted. Please start or load a new session.</div>',
+                );
+              updateChatPanelState(false);
+              // After deleting the current session, we can do a soft refresh
+              fetchAndDisplaySessions();
+              // Or a hard refresh to reset to defaults
+              // fetchAndUpdateInitialStatus();
             } else {
               fetchAndDisplaySessions();
             }
