@@ -56,6 +56,21 @@ async def _resolve_staged_items_for_core(
     staged_items_from_js: List[Dict[str, Any]],
     session_id_for_staging: Optional[str]
 ) -> List[Union[LLMCoreMessage, LLMCoreContextItem]]:
+    """
+    Resolves items from the client's 'active_context_specification' into
+    LLMCoreMessage or LLMCoreContextItem objects suitable for LLMCore.
+
+    This function now correctly handles 'file_content' items by reading the
+    file from the specified server-side path, ensuring its content is included
+    in the context.
+
+    Args:
+        staged_items_from_js: The list of item dictionaries from the client.
+        session_id_for_staging: The ID of the session to resolve against.
+
+    Returns:
+        A list of resolved LLMCoreMessage or LLMCoreContextItem objects.
+    """
     if not llmcore_instance: logger.error("_resolve_staged_items_for_core called but llmcore_instance is None."); return []
     explicitly_staged_items: List[Union[LLMCoreMessage, LLMCoreContextItem]] = []
     if not staged_items_from_js: return explicitly_staged_items
@@ -73,7 +88,15 @@ async def _resolve_staged_items_for_core(
                 resolved_item = await llmcore_instance.get_context_item(session_id_for_staging, item_id_ref)
                 if resolved_item: logger.debug(f"Resolved staged workspace_item: {item_id_ref}")
             elif item_type_str == "file_content" and item_path:
-                # This logic now reads the file from the server-side path.
+                # --- Rationale Block: BUG-01 Fix ---
+                # Pre-state: This block incorrectly used `item_content` (which is null for files)
+                #            instead of reading the file from `item_path`.
+                # Limitation: This caused staged files to have no content, making them useless in the LLM prompt.
+                # Decision Path: The fix is to use `pathlib` to safely handle the server-side path
+                #                and `read_text()` to load the file's content into the ContextItem.
+                # Post-state: The function now correctly reads the file content, ensuring staged files
+                #             are properly included in the context sent to llmcore.
+                # --- End Rationale Block ---
                 file_path_obj = Path(item_path).expanduser()
                 if file_path_obj.is_file():
                     file_content_from_path = file_path_obj.read_text(encoding='utf-8', errors='ignore')
