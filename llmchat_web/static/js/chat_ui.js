@@ -5,6 +5,7 @@
  * @description Handles chat message UI, sending messages, SSE, and per-message actions.
  * Now also handles the 'rag_results' SSE event, sending data from the
  * "UI Managed" Prompt Workbench mode, and adding action buttons to user messages.
+ * This version includes fixes for preserving action buttons during streaming.
  * Depends on utils.js, rag_ui.js, session_api.js and accesses global state from main_controller.js.
  */
 
@@ -28,16 +29,14 @@ function appendMessageToChat(
   const messageId =
     elementIdOverride ||
     `msg-elem-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+
+  // Use a content span to separate text from actions
+  const $contentSpan = $("<span>").text(text);
   const $messageDiv = $("<div>", {
     id: messageId,
     class: `message-bubble ${sender === "user" ? "user-message" : "agent-message"} ${isError ? "error-message-bubble" : ""}`,
-    text: text, // Using .text() to prevent accidental HTML injection from message content itself
-  });
+  }).append($contentSpan);
 
-  // For UX-03: Add action buttons to all non-error messages.
-  // The buttons rely on the `data-message-id` attribute to be functional.
-  // This attribute is added immediately if a persistentMessageId is available (e.g., for loaded messages),
-  // or added later by `sendMessage` for newly sent user messages once their ID is known.
   if (!isError) {
     const actionsHtml = `
           <div class="message-actions mt-1">
@@ -75,7 +74,6 @@ async function sendMessage() {
     return;
   }
 
-  // For UX-03: Get the element ID for the user message so we can update it later.
   const userMessageElementId = appendMessageToChat(messageText, "user");
 
   $("#chat-input").val("");
@@ -91,10 +89,11 @@ async function sendMessage() {
     null,
     agentMessageElementId,
   );
+  // Get a reference to the content span within the agent message bubble
+  const $agentContentSpan = $(`#${agentMessageElementId}`).find("span").first();
 
-  // Clear previous RAG results from the UI at the start of a new chat turn
   if (typeof displayRetrievedDocuments === "function") {
-    displayRetrievedDocuments([]); // Calling with empty array will clear the display
+    displayRetrievedDocuments([]);
   }
 
   const isUIManaged = $("#context-mode-toggle").is(":checked");
@@ -123,10 +122,6 @@ async function sendMessage() {
     });
     payload.active_context_specification = window.stagedContextItems;
     payload.message_inclusion_map = mapIsRelevant ? messageInclusionMap : null;
-    console.log(
-      "CHAT_UI: Constructed message inclusion map to send:",
-      messageInclusionMap,
-    );
   }
 
   try {
@@ -140,10 +135,8 @@ async function sendMessage() {
       const errorData = await response
         .json()
         .catch(() => ({ error: "Unknown server error" }));
-      console.error("Chat API error response:", errorData);
-      const errorMessage = errorData.error || response.statusText;
-      $(`#${agentMessageElementId}`).html(
-        `<span class="text-danger">Error: ${escapeHtml(errorMessage)}</span>`,
+      $agentContentSpan.html(
+        `<span class="text-danger">Error: ${escapeHtml(errorData.error || response.statusText)}</span>`,
       );
       if (typeof updateContextUsageDisplay === "function")
         updateContextUsageDisplay(null);
@@ -171,9 +164,7 @@ async function sendMessage() {
             const eventData = JSON.parse(line.substring(6));
             if (eventData.type === "chunk") {
               accumulatedContent += eventData.content;
-              $(`#${agentMessageElementId}`).html(
-                escapeHtml(accumulatedContent),
-              );
+              $agentContentSpan.text(accumulatedContent); // Use .text() to update only the content span
             } else if (
               eventData.type === "full_response_id" &&
               eventData.message_id
@@ -187,54 +178,36 @@ async function sendMessage() {
               if (typeof updateContextUsageDisplay === "function")
                 updateContextUsageDisplay(eventData.data);
             } else if (eventData.type === "rag_results") {
-              console.log(
-                "CHAT_UI: Received rag_results event:",
-                eventData.documents,
-              );
               if (typeof displayRetrievedDocuments === "function") {
                 displayRetrievedDocuments(eventData.documents || []);
               }
             } else if (eventData.type === "end") {
-              console.log("Stream ended by server.");
-              // For UX-03: After the stream is fully processed, update the user message with its persistent ID.
               if (window.currentLlmSessionId) {
-                apiLoadSession(window.currentLlmSessionId)
-                  .done(function (response) {
+                apiLoadSession(window.currentLlmSessionId).done(
+                  function (response) {
                     if (
                       response &&
                       response.session_data &&
                       response.session_data.messages
                     ) {
                       const messages = response.session_data.messages;
-                      // The most recently saved user message should be the one we just sent.
-                      // Loop backwards to find the first user message from the end.
                       for (let i = messages.length - 1; i >= 0; i--) {
                         if (messages[i].role === "user") {
-                          const lastUserMessageId = messages[i].id;
                           $(`#${userMessageElementId}`).attr(
                             "data-message-id",
-                            lastUserMessageId,
+                            messages[i].id,
                           );
-                          console.log(
-                            `CHAT_UI: Updated user message element #${userMessageElementId} with persistent ID ${lastUserMessageId}`,
-                          );
-                          break; // Exit after finding the last user message
+                          break;
                         }
                       }
                     }
-                  })
-                  .fail(function () {
-                    console.error(
-                      `CHAT_UI: Failed to reload session to get user message ID after chat completion.`,
-                    );
-                  });
+                  },
+                );
               }
               return;
             } else if (eventData.type === "error") {
-              console.error("SSE Error Event:", eventData.error);
-              const sseErrorMessage = eventData.error;
-              $(`#${agentMessageElementId}`).html(
-                `<span class="text-danger">Stream Error: ${escapeHtml(sseErrorMessage)}</span>`,
+              $agentContentSpan.html(
+                `<span class="text-danger">Stream Error: ${escapeHtml(eventData.error)}</span>`,
               );
               return;
             }
@@ -245,11 +218,8 @@ async function sendMessage() {
       }
     }
   } catch (error) {
-    console.error("Error sending message:", error);
-    const catchErrorMessage =
-      error.message || "Could not connect to chat service.";
-    $(`#${agentMessageElementId}`).html(
-      `<span class="text-danger">Error: ${escapeHtml(catchErrorMessage)}</span>`,
+    $agentContentSpan.html(
+      `<span class="text-danger">Error: ${escapeHtml(error.message || "Could not connect to chat service.")}</span>`,
     );
     if (typeof updateContextUsageDisplay === "function")
       updateContextUsageDisplay(null);
@@ -275,10 +245,8 @@ function initChatEventListeners() {
   $("#chat-messages").on("click", ".btn-copy-message", function () {
     const messageContent = $(this)
       .closest(".message-bubble")
-      .clone()
-      .children(".message-actions")
-      .remove()
-      .end()
+      .find("span")
+      .first()
       .text()
       .trim();
     navigator.clipboard
@@ -302,9 +270,6 @@ function initChatEventListeners() {
       );
       return;
     }
-    console.log(
-      `Adding message ${messageId} to workspace for session ${window.currentLlmSessionId}`,
-    );
     $.ajax({
       url: `/api/sessions/${window.currentLlmSessionId}/workspace/add_from_message`,
       type: "POST",
@@ -312,7 +277,6 @@ function initChatEventListeners() {
       data: JSON.stringify({ message_id: messageId }),
       dataType: "json",
       success: function (response) {
-        console.log("Add to workspace response:", response);
         showToast(
           "Success",
           `Message added to workspace as item: ${escapeHtml(response.id)}`,
@@ -321,20 +285,14 @@ function initChatEventListeners() {
         if (
           typeof fetchAndDisplayWorkspaceItems === "function" &&
           $("#context-manager-tab-btn").hasClass("active") &&
-          $("#workspace-subtab-btn").hasClass("active") // Check if sub-tab is active
+          $("#workspace-subtab-btn").hasClass("active")
         ) {
           fetchAndDisplayWorkspaceItems();
         }
       },
-      error: function (jqXHR, textStatus, errorThrown) {
-        console.error(
-          "Error adding message to workspace:",
-          textStatus,
-          errorThrown,
-        );
-        const errorMsg = jqXHR.responseJSON
-          ? jqXHR.responseJSON.error
-          : "Failed to add message to workspace.";
+      error: function (jqXHR) {
+        const errorMsg =
+          jqXHR.responseJSON?.error || "Failed to add message to workspace.";
         showToast("Error", errorMsg, "danger");
       },
     });
@@ -358,15 +316,11 @@ function initChatEventListeners() {
       true,
       function (confirmed) {
         if (confirmed) {
-          console.log(
-            `Deleting message ${messageId} from session ${window.currentLlmSessionId}`,
-          );
           $.ajax({
             url: `/api/sessions/${window.currentLlmSessionId}/messages/${messageId}`,
             type: "DELETE",
             dataType: "json",
             success: function (response) {
-              console.log("Delete message response:", response);
               showToast(
                 "Success",
                 response.message || "Message deleted successfully.",
@@ -376,11 +330,9 @@ function initChatEventListeners() {
                 $(this).remove();
               });
             },
-            error: function (jqXHR, textStatus, errorThrown) {
-              console.error("Error deleting message:", textStatus, errorThrown);
-              const errorMsg = jqXHR.responseJSON
-                ? jqXHR.responseJSON.error
-                : "Failed to delete message.";
+            error: function (jqXHR) {
+              const errorMsg =
+                jqXHR.responseJSON?.error || "Failed to delete message.";
               showToast("Error", errorMsg, "danger");
             },
           });
