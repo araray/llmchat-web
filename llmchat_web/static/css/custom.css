@@ -1,41 +1,430 @@
 /* llmchat_web/static/css/custom.css */
-
 /*
-    This file will contain custom CSS styles for the llmchat-web application.
-    It complements Bootstrap 5 and is used to achieve the specific look and feel,
-    such as the dark theme, panel sizing, and other visual refinements.
-
-    For the initial mockup, most specific styles were embedded directly in
-    the <style> block of index.html. As the project progresses, those styles
-    can be moved here and organized.
+  This file contains custom CSS styles for the llmchat-web application.
+  It has been refactored to use CSS variables to support theming.
+  The :root selector defines the variables for the default (dark) theme.
+  Other theme files can be created to override these variables for different looks.
 */
 
-/* Example: General body styling (if not already in index.html's <style> block or if overriding) */
+:root {
+    /* Color Palette - Default (Dark Theme) */
+    --bg-primary: #212529;
+    --bg-secondary: #2b2b2b;
+    --bg-tertiary: #343a40;
+    --bg-quaternary: #2c3034;
+    --bg-input: #2c3034;
+    --bg-element: #3a3f44;
+    --bg-element-hover: #495057;
+
+    --text-primary: #dee2e6;
+    --text-secondary: #adb5bd;
+    --text-muted: #6c757d;
+    --text-on-accent: #ffffff;
+    --text-placeholder: #6c757d;
+    --text-info: #88c0d0; /* Nord cyan */
+    --text-link: #0d6efd;
+
+    --border-primary: #495057;
+    --border-secondary: #2b2b2b;
+
+    --accent-primary: #0d6efd; /* Bootstrap Primary Blue */
+    --accent-user-message-bg: #007bff;
+    --accent-agent-message-bg: #495057;
+    --accent-success: #198754;
+    --accent-info: #0dcaf0;
+    --accent-warning: #ffc107;
+    --accent-danger: #dc3545;
+    --accent-badge-success-bg: #198754;
+    --accent-badge-warning-bg: #ffc107;
+    --accent-badge-danger-bg: #dc3545;
+    --accent-badge-info-bg: #343a40;
+}
+
+/* General body styling */
 body {
     font-family:
         -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
         Arial, sans-serif;
-    /* Styles for dark theme are primarily in index.html for now */
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    overflow-x: hidden;
 }
-
-/* Placeholder for future styles */
-/*
-.top-bar { ... }
-.left-sidebar { ... }
-.main-content-area { ... }
-.chat-messages { ... }
-.message-bubble { ... }
-.user-message { ... }
-.agent-message { ... }
-.bottom-control-bar { ... }
-*/
-
-/* Ensure icons are vertically aligned with text if needed */
+#app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+/* Top Bar */
+.top-bar {
+    background-color: var(--bg-tertiary);
+    padding: 0.5rem 1rem;
+    color: var(--text-primary);
+    flex-shrink: 0;
+    font-size: 0.85rem;
+}
+.top-bar .status-item {
+    margin-right: 15px;
+}
+.top-bar .status-item .badge {
+    font-size: 0.8rem;
+}
+.top-bar .llmchat-brand {
+    font-weight: bold;
+}
+/* Main Layout */
+.main-layout {
+    display: flex;
+    flex-grow: 1;
+    overflow: hidden;
+}
+/* Left Sidebar */
+.left-sidebar {
+    width: 280px;
+    background-color: var(--bg-quaternary);
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border-primary);
+}
+.left-sidebar h5 {
+    color: var(--text-secondary);
+}
+.left-sidebar .list-group-item {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-primary);
+    color: var(--text-primary);
+    cursor: pointer;
+    margin-bottom: 5px;
+    border-radius: 0.25rem;
+}
+.left-sidebar .list-group-item.active {
+    background-color: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: var(--text-on-accent);
+}
+.left-sidebar .list-group-item:hover {
+    background-color: var(--bg-element-hover);
+}
+.left-sidebar .btn-group .btn {
+    font-size: 0.9rem;
+}
+/* Main Content Area */
+.main-content-area {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--bg-secondary);
+    padding: 0;
+    overflow: hidden;
+}
+.main-content-area .nav-tabs .nav-link {
+    color: var(--text-secondary);
+    border-top-left-radius: 0.25rem;
+    border-top-right-radius: 0.25rem;
+    background-color: var(--bg-tertiary);
+    border-bottom-color: var(--border-secondary);
+    margin-right: 2px;
+}
+.main-content-area .nav-tabs .nav-link.active {
+    color: var(--text-primary);
+    background-color: var(--bg-secondary);
+    border-color: var(--border-primary) var(--border-primary)
+        var(--border-secondary);
+}
+.main-content-area .tab-content {
+    flex-grow: 1;
+    padding: 1rem;
+    overflow-y: auto;
+    background-color: var(--bg-secondary);
+}
+#contextSubTabsContent {
+    height: 100%;
+}
+#contextSubTabsContent .tab-pane {
+    height: 100%;
+}
+/* Chat Tab Specifics */
+#chat-messages {
+    height: 100%;
+    overflow-y: auto;
+    padding: 10px;
+    display: flex;
+    flex-direction: column-reverse;
+}
+.message-bubble {
+    padding: 8px 12px;
+    border-radius: 15px;
+    margin-bottom: 10px;
+    max-width: 75%;
+    word-wrap: break-word;
+}
+.user-message {
+    background-color: var(--accent-user-message-bg);
+    color: var(--text-on-accent);
+    align-self: flex-end;
+    border-bottom-right-radius: 5px;
+}
+.agent-message {
+    background-color: var(--accent-agent-message-bg);
+    color: var(--text-primary);
+    align-self: flex-start;
+    border-bottom-left-radius: 5px;
+}
+.message-bubble.error-message-bubble {
+    background-color: var(--accent-danger);
+    color: var(--text-on-accent);
+}
+.message-actions {
+    font-size: 0.75rem;
+}
+.message-actions .btn {
+    padding: 0.1rem 0.3rem;
+}
+/* Chat input area */
+#chat-input-area {
+    padding: 10px;
+    background-color: var(--bg-tertiary);
+}
+#chat-input-area textarea {
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+}
+#chat-input-area textarea::placeholder {
+    color: var(--text-placeholder);
+}
+/* Bottom Control Bar */
+.bottom-control-bar {
+    background-color: var(--bg-tertiary);
+    padding: 0;
+    flex-shrink: 0;
+    border-top: 1px solid var(--border-primary);
+}
+.bottom-control-bar .nav-tabs .nav-link {
+    color: var(--text-secondary);
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-bottom-left-radius: 0.25rem;
+    border-bottom-right-radius: 0.25rem;
+    background-color: var(--bg-quaternary);
+    border-top-color: var(--bg-tertiary);
+    margin-right: 2px;
+}
+.bottom-control-bar .nav-tabs .nav-link.active {
+    color: var(--text-primary);
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-primary) var(--border-primary) var(--bg-tertiary);
+}
+.bottom-control-bar .tab-content {
+    padding: 0;
+    background-color: var(--bg-tertiary);
+}
+.bottom-control-bar .form-control,
+.bottom-control-bar .form-select,
+.bottom-control-bar .btn {
+    font-size: 0.9rem;
+}
+.bottom-control-bar .form-control,
+.bottom-control-bar .form-select {
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+}
+.bottom-control-bar .form-control::placeholder {
+    color: var(--text-placeholder);
+}
+.bottom-control-bar .form-check-input {
+    background-color: var(--bg-element-hover);
+    border-color: var(--text-muted);
+}
+.bottom-control-bar .form-check-input:checked {
+    background-color: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+/* Utility classes */
+.d-flex-fill-column {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    overflow: hidden;
+}
+.tab-pane-full-height {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+/* Workspace & RAG Tab Styling */
+.workspace-item,
+.staged-context-item {
+    background-color: var(--bg-element);
+    border: 1px solid var(--border-primary);
+    border-radius: 0.25rem;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+}
+.workspace-item-header,
+.staged-item-header {
+    font-size: 0.9rem;
+    font-weight: bold;
+    color: var(--text-secondary);
+}
+.workspace-item-content-preview,
+.staged-item-content-preview {
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    max-height: 60px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: pre-wrap;
+}
+.workspace-item-actions .btn,
+.staged-item-actions .btn {
+    font-size: 0.75rem;
+    padding: 0.1rem 0.3rem;
+}
+#context-preview-query-input {
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+}
+#context-preview-query-input::placeholder {
+    color: var(--text-placeholder);
+}
+/* Ingestion Modal Styling */
+#ingestionModal .nav-tabs .nav-link {
+    background-color: var(--bg-element-hover);
+    color: var(--text-secondary);
+    border-bottom-color: var(--bg-tertiary);
+}
+#ingestionModal .nav-tabs .nav-link.active {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--border-primary) var(--border-primary) var(--bg-tertiary);
+}
+#ingestionModal .form-label {
+    font-size: 0.9rem;
+}
+#ingestionModal .form-control,
+#ingestionModal .form-select {
+    font-size: 0.9rem;
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+}
+#ingestionModal .form-control::placeholder {
+    color: var(--text-placeholder);
+}
+#ingestion-progress-bar {
+    height: 10px;
+}
+/* Settings & RAG Tab Styling */
+#settings-pane .form-label,
+#rag-pane-main .form-label {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+#settings-pane .form-select,
+#settings-pane .form-control,
+#rag-pane-main .form-select,
+#rag-pane-main .form-control {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+    font-size: 0.9rem;
+}
+#settings-pane .form-select:disabled,
+#settings-pane .form-control:disabled,
+#rag-pane-main .form-select:disabled,
+#rag-pane-main .form-control:disabled {
+    background-color: var(--bg-element-hover);
+    opacity: 0.7;
+}
+#settings-pane .btn,
+#rag-pane-main .btn {
+    font-size: 0.9rem;
+}
+#settings-pane h5,
+#settings-pane h6,
+#rag-pane-main h6 {
+    color: var(--text-primary);
+    margin-top: 1rem;
+    margin-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border-primary);
+    padding-bottom: 0.25rem;
+}
+/* RAG Inspector styling */
+#rag-retrieved-docs-display .list-group-item {
+    background-color: var(--bg-element);
+    border-color: var(--border-primary);
+    color: var(--text-primary);
+    padding: 0.5rem 0.75rem;
+}
+#rag-retrieved-docs-display h6 {
+    color: var(--text-info);
+    margin-bottom: 0.25rem;
+    border: none;
+}
+#rag-retrieved-docs-display pre {
+    background-color: var(--bg-input);
+    padding: 5px;
+    border-radius: 3px;
+    max-height: 80px;
+    overflow-y: auto;
+    font-size: 0.8em;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+#rag-retrieved-docs-display .rag-doc-actions .btn {
+    font-size: 0.75rem;
+}
+/* Direct RAG Search Results Modal */
+#directRagSearchResultsModal .modal-body {
+    font-size: 0.85rem;
+}
+#directRagSearchResultsModal .list-group-item {
+    background-color: var(--bg-element);
+    border-color: var(--border-primary);
+    color: var(--text-primary);
+    padding: 0.5rem 0.75rem;
+}
+#directRagSearchResultsModal .list-group-item strong {
+    color: var(--text-info);
+}
+#directRagSearchResultsModal pre {
+    background-color: var(--bg-input);
+    padding: 5px;
+    border-radius: 3px;
+    max-height: 80px;
+    overflow-y: auto;
+    font-size: 0.8em;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+/* Prompt Template Values Table Styling */
+#prompt-values-table th,
+#prompt-values-table td {
+    font-size: 0.85rem;
+    vertical-align: middle;
+}
+#prompt-values-table .form-control-sm {
+    font-size: 0.85rem;
+}
+#prompt-values-table .btn-sm {
+    padding: 0.2rem 0.4rem;
+    font-size: 0.75rem;
+}
+/* Prompt Workbench Styling */
+#prompt-workbench-textarea {
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+    resize: vertical;
+}
+/* Font Awesome Icons */
 .fas,
 .far,
 .fab {
-    /* Font Awesome classes */
-    vertical-align: -0.125em; /* Adjust as needed */
+    vertical-align: -0.125em;
 }
-
-/* Add any global custom styles or overrides here */
