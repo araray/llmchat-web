@@ -3,9 +3,9 @@
 /**
  * @file chat_ui.js
  * @description Handles chat message UI, sending messages, SSE, and per-message actions.
- * Now also handles the 'rag_results' SSE event and sending data from the
- * new "UI Managed" Prompt Workbench mode.
- * Depends on utils.js, rag_ui.js, and accesses global state from main_controller.js.
+ * Now also handles the 'rag_results' SSE event, sending data from the
+ * "UI Managed" Prompt Workbench mode, and adding action buttons to user messages.
+ * Depends on utils.js, rag_ui.js, session_api.js and accesses global state from main_controller.js.
  */
 
 /**
@@ -34,16 +34,22 @@ function appendMessageToChat(
     text: text, // Using .text() to prevent accidental HTML injection from message content itself
   });
 
-  if (persistentMessageId) {
-    $messageDiv.attr("data-message-id", persistentMessageId);
-    // Add action buttons for messages that have a persistent ID
+  // For UX-03: Add action buttons to all non-error messages.
+  // The buttons rely on the `data-message-id` attribute to be functional.
+  // This attribute is added immediately if a persistentMessageId is available (e.g., for loaded messages),
+  // or added later by `sendMessage` for newly sent user messages once their ID is known.
+  if (!isError) {
     const actionsHtml = `
           <div class="message-actions mt-1">
               <button class="btn btn-sm btn-outline-light btn-copy-message" title="Copy"><i class="fas fa-copy fa-xs"></i></button>
               <button class="btn btn-sm btn-outline-light btn-add-workspace" title="Add to Workspace"><i class="fas fa-plus-square fa-xs"></i></button>
               <button class="btn btn-sm btn-outline-light btn-delete-message" title="Delete Message"><i class="fas fa-trash fa-xs"></i></button>
           </div>`;
-    $messageDiv.append(actionsHtml); // Actions are trusted HTML
+    $messageDiv.append(actionsHtml);
+  }
+
+  if (persistentMessageId) {
+    $messageDiv.attr("data-message-id", persistentMessageId);
   }
 
   $chatMessages.prepend($messageDiv);
@@ -53,9 +59,9 @@ function appendMessageToChat(
 /**
  * Sends the chat message to the backend and handles streaming response.
  * It now checks for the context management mode ('LLMCore' vs 'UI') and constructs
- * the payload accordingly.
+ * the payload accordingly. After completion, it fetches the user message's persistent ID.
  * Accesses global variables: currentLlmSessionId, stagedContextItems.
- * Calls global functions: updateContextUsageDisplay, displayRetrievedDocuments.
+ * Calls global functions: updateContextUsageDisplay, displayRetrievedDocuments, apiLoadSession.
  */
 async function sendMessage() {
   const messageText = $("#chat-input").val().trim();
@@ -69,7 +75,9 @@ async function sendMessage() {
     return;
   }
 
-  appendMessageToChat(messageText, "user");
+  // For UX-03: Get the element ID for the user message so we can update it later.
+  const userMessageElementId = appendMessageToChat(messageText, "user");
+
   $("#chat-input").val("");
   if (typeof updateChatInputTokenEstimate === "function") {
     updateChatInputTokenEstimate();
@@ -88,23 +96,6 @@ async function sendMessage() {
   if (typeof displayRetrievedDocuments === "function") {
     displayRetrievedDocuments([]); // Calling with empty array will clear the display
   }
-
-  // --- Rationale Block: FEAT-03 - Frontend Payload Logic ---
-  // Pre-state: The sendMessage function always constructed a payload with
-  //            `active_context_specification` and `message_inclusion_map`.
-  // Limitation: This did not account for the new "UI Managed" mode where a raw
-  //             prompt should be sent instead.
-  // Decision Path: A conditional check on the `#context-mode-toggle` switch is
-  //                introduced.
-  //                - If checked (UI Managed): The payload will include the
-  //                  `raw_prompt_workbench_content` key with the content from the
-  //                  `#prompt-workbench-textarea`.
-  //                - If unchecked (LLMCore Managed): The payload will be constructed
-  //                  as before, with `active_context_specification` and
-  //                  `message_inclusion_map`.
-  // Post-state: The frontend now sends the correct payload to the backend based
-  //             on the user-selected context management mode.
-  // --- End Rationale Block ---
 
   const isUIManaged = $("#context-mode-toggle").is(":checked");
   const payload = {
@@ -164,12 +155,6 @@ async function sendMessage() {
     let buffer = "";
     let accumulatedContent = "";
     let persistentMsgId = null;
-    const actionsHtml = `
-        <div class="message-actions mt-1">
-            <button class="btn btn-sm btn-outline-light btn-copy-message" title="Copy"><i class="fas fa-copy fa-xs"></i></button>
-            <button class="btn btn-sm btn-outline-light btn-add-workspace" title="Add to Workspace"><i class="fas fa-plus-square fa-xs"></i></button>
-            <button class="btn btn-sm btn-outline-light btn-delete-message" title="Delete Message"><i class="fas fa-trash fa-xs"></i></button>
-        </div>`;
 
     while (true) {
       const { value, done } = await reader.read();
@@ -198,17 +183,10 @@ async function sendMessage() {
                 "data-message-id",
                 persistentMsgId,
               );
-              if (
-                $(`#${agentMessageElementId}`).find(".message-actions")
-                  .length === 0
-              ) {
-                $(`#${agentMessageElementId}`).append(actionsHtml);
-              }
             } else if (eventData.type === "context_usage" && eventData.data) {
               if (typeof updateContextUsageDisplay === "function")
                 updateContextUsageDisplay(eventData.data);
             } else if (eventData.type === "rag_results") {
-              // --- Start: RAG Results Handling ---
               console.log(
                 "CHAT_UI: Received rag_results event:",
                 eventData.documents,
@@ -216,23 +194,40 @@ async function sendMessage() {
               if (typeof displayRetrievedDocuments === "function") {
                 displayRetrievedDocuments(eventData.documents || []);
               }
-              // --- End: RAG Results Handling ---
             } else if (eventData.type === "end") {
               console.log("Stream ended by server.");
-              if (
-                !persistentMsgId &&
-                $(`#${agentMessageElementId}`).attr("data-message-id")
-              ) {
-                persistentMsgId = $(`#${agentMessageElementId}`).attr(
-                  "data-message-id",
-                );
-              }
-              if (
-                persistentMsgId &&
-                $(`#${agentMessageElementId}`).find(".message-actions")
-                  .length === 0
-              ) {
-                $(`#${agentMessageElementId}`).append(actionsHtml);
+              // For UX-03: After the stream is fully processed, update the user message with its persistent ID.
+              if (window.currentLlmSessionId) {
+                apiLoadSession(window.currentLlmSessionId)
+                  .done(function (response) {
+                    if (
+                      response &&
+                      response.session_data &&
+                      response.session_data.messages
+                    ) {
+                      const messages = response.session_data.messages;
+                      // The most recently saved user message should be the one we just sent.
+                      // Loop backwards to find the first user message from the end.
+                      for (let i = messages.length - 1; i >= 0; i--) {
+                        if (messages[i].role === "user") {
+                          const lastUserMessageId = messages[i].id;
+                          $(`#${userMessageElementId}`).attr(
+                            "data-message-id",
+                            lastUserMessageId,
+                          );
+                          console.log(
+                            `CHAT_UI: Updated user message element #${userMessageElementId} with persistent ID ${lastUserMessageId}`,
+                          );
+                          break; // Exit after finding the last user message
+                        }
+                      }
+                    }
+                  })
+                  .fail(function () {
+                    console.error(
+                      `CHAT_UI: Failed to reload session to get user message ID after chat completion.`,
+                    );
+                  });
               }
               return;
             } else if (eventData.type === "error") {
@@ -248,20 +243,6 @@ async function sendMessage() {
           }
         }
       }
-    }
-    // Final update of chat content and actions if not already done by 'end' or 'full_response_id'
-    $(`#${agentMessageElementId}`).html(escapeHtml(accumulatedContent));
-    if (
-      !$(`#${agentMessageElementId}`).attr("data-message-id") &&
-      persistentMsgId
-    ) {
-      $(`#${agentMessageElementId}`).attr("data-message-id", persistentMsgId);
-    }
-    if (
-      $(`#${agentMessageElementId}`).attr("data-message-id") &&
-      $(`#${agentMessageElementId}`).find(".message-actions").length === 0
-    ) {
-      $(`#${agentMessageElementId}`).append(actionsHtml);
     }
   } catch (error) {
     console.error("Error sending message:", error);
