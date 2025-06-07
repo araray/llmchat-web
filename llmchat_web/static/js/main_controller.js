@@ -170,11 +170,8 @@ function fetchAndUpdateInitialStatus() {
       if (typeof updateContextUsageDisplay === "function") {
         // The /api/status endpoint now returns the last known context usage.
         // We store this in our global state to act as the baseline for the live counter.
-        window.lastBaseContextUsage = status.context_usage || {
-          tokens_used: 0,
-          max_tokens: 0,
-        };
-        updateContextUsageDisplay(window.lastBaseContextUsage, 0);
+        window.lastBaseContextUsage = status.context_usage; // Can be null
+        updateContextUsageDisplay(window.lastBaseContextUsage);
       }
 
       if (typeof fetchAndPopulateLlmProviders === "function")
@@ -323,6 +320,10 @@ $(document).ready(function () {
         if (typeof renderStagedContextItems === "function")
           renderStagedContextItems();
 
+        // When a new session is created, reset the base context usage
+        window.lastBaseContextUsage = null;
+        updateContextUsageDisplay(null);
+
         $("#session-list .list-group-item.active").removeClass("active");
         const $newSessionItem = $("<a>", {
           href: "#",
@@ -397,11 +398,8 @@ $(document).ready(function () {
 
         // Update context usage display with data from load response
         if (typeof updateContextUsageDisplay === "function") {
-          window.lastBaseContextUsage = response.context_usage || {
-            tokens_used: 0,
-            max_tokens: 0,
-          };
-          updateContextUsageDisplay(window.lastBaseContextUsage, 0);
+          window.lastBaseContextUsage = response.context_usage; // Can be null
+          updateContextUsageDisplay(window.lastBaseContextUsage);
         }
 
         if (typeof updateRagControlsState === "function")

@@ -79,10 +79,11 @@ async function sendMessage() {
   const userMessageElementId = appendMessageToChat(messageText, "user");
 
   $("#chat-input").val("");
-  // After clearing the input, reset the token estimate display and full context preview.
-  if (typeof updateChatInputTokenEstimate === "function") {
-    updateChatInputTokenEstimate();
+  // After clearing the input, trigger the token update logic.
+  if (typeof updateLiveTokens === "function") {
+    updateLiveTokens();
   }
+  // Also trigger full context preview if needed by other components
   if (typeof updateFullContextPreview === "function") {
     updateFullContextPreview();
   }
@@ -145,7 +146,7 @@ async function sendMessage() {
         `<span class="text-danger">Error: ${escapeHtml(errorData.error || response.statusText)}</span>`,
       );
       if (typeof updateContextUsageDisplay === "function")
-        updateContextUsageDisplay(null, 0);
+        updateContextUsageDisplay(null);
       return;
     }
 
@@ -181,11 +182,11 @@ async function sendMessage() {
                 persistentMsgId,
               );
             } else if (eventData.type === "context_usage" && eventData.data) {
-              // Store the authoritative context usage from the last turn.
+              // This is the new authoritative base context. Store it globally.
               window.lastBaseContextUsage = eventData.data;
               // Now, update the display. Since the prompt box is now empty, promptTokens is 0.
               if (typeof updateContextUsageDisplay === "function") {
-                updateContextUsageDisplay(window.lastBaseContextUsage, 0);
+                updateContextUsageDisplay(window.lastBaseContextUsage);
               }
             } else if (eventData.type === "rag_results") {
               if (typeof displayRetrievedDocuments === "function") {
@@ -232,14 +233,13 @@ async function sendMessage() {
       `<span class="text-danger">Error: ${escapeHtml(error.message || "Could not connect to chat service.")}</span>`,
     );
     if (typeof updateContextUsageDisplay === "function")
-      updateContextUsageDisplay(null, 0);
+      updateContextUsageDisplay(null);
   }
 }
 
 /**
  * Initializes event listeners related to chat messages. This now includes
- * an 'input' event listener to trigger real-time token estimation for both
- * the local input and the full context preview.
+ * an 'input' event listener to trigger real-time token estimation and update the live counter.
  */
 function initChatEventListeners() {
   $("#send-chat-message").on("click", function () {
@@ -248,10 +248,10 @@ function initChatEventListeners() {
 
   // Add listener for the 'input' event to provide real-time feedback as the user types.
   $("#chat-input").on("input", function () {
-    if (typeof updateChatInputTokenEstimate === "function") {
-      updateChatInputTokenEstimate();
+    if (typeof updateLiveTokens === "function") {
+      updateLiveTokens();
     }
-    // Also trigger the full context preview, as the user's query is part of the context
+    // A full context preview might still be desired for other UI elements, so we can keep this.
     if (typeof updateFullContextPreview === "function") {
       updateFullContextPreview();
     }
