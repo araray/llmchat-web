@@ -2,14 +2,12 @@
 
 /**
  * @file chat_ui.js
- * @description Handles chat message UI, sending messages, SSE, per-message actions, and raw output display.
+ * @description Handles chat message UI, sending messages, SSE, and per-message actions.
  * Depends on utils.js for helper functions (escapeHtml, showToast) and
- * accesses global variables/functions from custom.js (currentLlmSessionId, stagedContextItems,
+ * accesses global variables/functions from main_controller.js (currentLlmSessionId, stagedContextItems,
  * updateContextUsageDisplay, fetchAndDisplayWorkspaceItems).
+ * The logic for appending to the "Raw Output" tab has been removed as part of the UI refactor.
  */
-
-// Global variable to hold the jQuery object of the current raw output block
-let currentRawOutputBlock = null;
 
 /**
  * Appends a message to the chat UI.
@@ -54,48 +52,9 @@ function appendMessageToChat(
 }
 
 /**
- * Appends content to the Raw LLM Output display.
- * Each new response or error creates a new prepended block. Streamed chunks append to the current block.
- * @param {string} content - The raw content to append.
- * @param {boolean} isNewResponseBlock - True if this is the start of a new LLM response block, false if it's a continuing chunk.
- */
-function appendRawOutput(content, isNewResponseBlock) {
-  const $rawOutputDisplay = $("#raw-llm-output-display");
-
-  if (isNewResponseBlock) {
-    const timestamp = new Date().toLocaleTimeString();
-    const separator = `--- Raw Output at ${timestamp} ---\n`;
-    // Create a new <pre> element for this block
-    const $newBlock = $("<pre>").text(separator + content);
-    $rawOutputDisplay.prepend($newBlock);
-    currentRawOutputBlock = $newBlock; // Set as the current block for subsequent appends
-  } else {
-    if (currentRawOutputBlock) {
-      // Append content to the existing current block
-      currentRawOutputBlock.text(currentRawOutputBlock.text() + content);
-    } else {
-      // Fallback: If no current block, prepend as a new block (though this shouldn't happen if logic is correct)
-      console.warn(
-        "appendRawOutput: No currentRawOutputBlock, creating new block for chunk.",
-      );
-      const timestamp = new Date().toLocaleTimeString();
-      const fallbackSeparator = `--- Raw Output Chunk (no current block) at ${timestamp} ---\n`;
-      const $newBlock = $("<pre>").text(fallbackSeparator + content);
-      $rawOutputDisplay.prepend($newBlock);
-      currentRawOutputBlock = $newBlock; // Set this as current
-    }
-  }
-  // Ensure the main raw output display scrolls to the top to show the latest prepended block
-  if ($rawOutputDisplay[0]) {
-    $rawOutputDisplay.scrollTop(0);
-  }
-}
-
-/**
  * Sends the chat message to the backend and handles streaming response.
  * Accesses global currentLlmSessionId and stagedContextItems.
  * Calls global updateContextUsageDisplay.
- * Updates Raw Output tab.
  */
 async function sendMessage() {
   const messageText = $("#chat-input").val().trim();
@@ -109,10 +68,6 @@ async function sendMessage() {
     );
     return;
   }
-
-  // Flag to indicate the first chunk of a new response for raw output logic
-  let rawOutputIsNewResponseSegment = true;
-  currentRawOutputBlock = null; // Reset current raw output block for new message
 
   appendMessageToChat(messageText, "user");
   $("#chat-input").val("");
@@ -151,8 +106,6 @@ async function sendMessage() {
       $(`#${agentMessageElementId}`).html(
         `<span class="text-danger">Error: ${escapeHtml(errorMessage)}</span>`,
       );
-      appendRawOutput(`Error: ${errorMessage}`, rawOutputIsNewResponseSegment); // True for new error block
-      rawOutputIsNewResponseSegment = false; // Any further raw output for this error is part of the same "response"
       if (typeof updateContextUsageDisplay === "function")
         updateContextUsageDisplay(null); // Check if function exists
       return;
@@ -189,9 +142,6 @@ async function sendMessage() {
               $(`#${agentMessageElementId}`).html(
                 escapeHtml(accumulatedContent),
               );
-              // Append raw content to raw output display
-              appendRawOutput(eventData.content, rawOutputIsNewResponseSegment);
-              rawOutputIsNewResponseSegment = false; // Subsequent chunks are part of the same response
             } else if (
               eventData.type === "full_response_id" &&
               eventData.message_id
@@ -227,7 +177,6 @@ async function sendMessage() {
               ) {
                 $(`#${agentMessageElementId}`).append(actionsHtml);
               }
-              currentRawOutputBlock = null; // Clear current block on stream end
               return;
             } else if (eventData.type === "error") {
               console.error("SSE Error Event:", eventData.error);
@@ -235,22 +184,10 @@ async function sendMessage() {
               $(`#${agentMessageElementId}`).html(
                 `<span class="text-danger">Stream Error: ${escapeHtml(sseErrorMessage)}</span>`,
               );
-              appendRawOutput(
-                `Stream Error: ${sseErrorMessage}`,
-                rawOutputIsNewResponseSegment, // True for new error block
-              );
-              rawOutputIsNewResponseSegment = false;
-              currentRawOutputBlock = null; // Clear current block on error
               return;
             }
           } catch (e) {
             console.warn("Error parsing SSE event data:", e, "Line:", line);
-            // If parsing fails, log the raw line to raw output as a new block
-            appendRawOutput(
-              `Failed to parse SSE line: ${line}`,
-              rawOutputIsNewResponseSegment,
-            );
-            rawOutputIsNewResponseSegment = false; // subsequent lines of this error are part of same block
           }
         }
       }
@@ -269,7 +206,6 @@ async function sendMessage() {
     ) {
       $(`#${agentMessageElementId}`).append(actionsHtml);
     }
-    currentRawOutputBlock = null; // Clear current block as message is complete
   } catch (error) {
     console.error("Error sending message:", error);
     const catchErrorMessage =
@@ -277,13 +213,8 @@ async function sendMessage() {
     $(`#${agentMessageElementId}`).html(
       `<span class="text-danger">Error: ${escapeHtml(catchErrorMessage)}</span>`,
     );
-    appendRawOutput(
-      `Error: ${catchErrorMessage}`,
-      rawOutputIsNewResponseSegment, // True for new error block
-    );
     if (typeof updateContextUsageDisplay === "function")
       updateContextUsageDisplay(null); // Check if function exists
-    currentRawOutputBlock = null; // Clear current block on error
   }
 }
 
