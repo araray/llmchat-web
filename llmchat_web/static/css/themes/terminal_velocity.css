@@ -1,0 +1,52 @@
+/* llmchat_web/static/css/themes/terminal_velocity.css */
+/*
+  This file defines the CSS variables for the "Terminal Velocity" theme.
+  It is inspired by modern terminal color schemes with a dark background and vibrant text.
+*/
+
+:root {
+    /* Color Palette - Terminal Velocity */
+    --bg-primary: #1a1b26; /* Deep dark navy/charcoal background */
+    --bg-secondary: #24283b; /* Slightly lighter for main content areas */
+    --bg-tertiary: #1f2335; /* Darker grey for bars/headers */
+    --bg-quaternary: #1f2335; /* Sidebar background, matching tertiary */
+    --bg-input: #2c3042; /* A distinct input background color */
+    --bg-element: #2c3042; /* Background for items like workspace entries */
+    --bg-element-hover: #414868; /* Hover color for elements */
+
+    --text-primary: #c0caf5; /* Main light text color, slightly purplish-blue */
+    --text-secondary: #a9b1d6; /* Slightly brighter text for secondary elements */
+    --text-muted: #565f89; /* Muted text for less important info */
+    --text-on-accent: #ffffff; /* Pure white on colored buttons/messages */
+    --text-placeholder: #565f89;
+    --text-info: #7dcfff; /* Bright cyan for info highlights */
+    --text-link: #7aa2f7; /* Bright blue for links */
+
+    --border-primary: #414868; /* Border color for elements */
+    --border-secondary: #1a1b26; /* For borders against the darkest background */
+
+    --accent-primary: #7aa2f7; /* User message bubble & primary actions */
+    --accent-user-message-bg: #7aa2f7;
+    --accent-agent-message-bg: #2c3042; /* Agent message bubble color */
+    --accent-success: #9ece6a; /* Green for success states */
+    --accent-info: #7dcfff; /* Cyan for info states */
+    --accent-warning: #e0af68; /* Orange/yellow for warnings */
+    --accent-danger: #f7768e; /* Red/pink for danger states */
+
+    --accent-badge-success-bg: var(--accent-success);
+    --accent-badge-warning-bg: var(--accent-warning);
+    --accent-badge-danger-bg: var(--accent-danger);
+    --accent-badge-info-bg: var(--bg-element);
+}
+
+/* Specific overrides for this theme */
+.left-sidebar .list-group-item.active {
+    background-color: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: var(--bg-primary); /* Dark text on the light blue active item */
+    font-weight: bold;
+}
+
+#chat-messages .user-message {
+    color: var(--bg-primary); /* Dark text on the light blue user message */
+}
