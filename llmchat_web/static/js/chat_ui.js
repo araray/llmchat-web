@@ -5,7 +5,8 @@
  * @description Handles chat message UI, sending messages, SSE, and per-message actions.
  * Now also handles the 'rag_results' SSE event, sending data from the
  * "UI Managed" Prompt Workbench mode, and adding action buttons to user messages.
- * This version includes fixes for preserving action buttons during streaming.
+ * This version includes fixes for preserving action buttons during streaming and
+ * triggers real-time token estimation on input.
  * Depends on utils.js, rag_ui.js, session_api.js and accesses global state from main_controller.js.
  */
 
@@ -77,6 +78,7 @@ async function sendMessage() {
   const userMessageElementId = appendMessageToChat(messageText, "user");
 
   $("#chat-input").val("");
+  // After clearing the input, reset the token estimate display to zero.
   if (typeof updateChatInputTokenEstimate === "function") {
     updateChatInputTokenEstimate();
   }
@@ -227,11 +229,19 @@ async function sendMessage() {
 }
 
 /**
- * Initializes event listeners related to chat messages.
+ * Initializes event listeners related to chat messages. This now includes
+ * an 'input' event listener to trigger real-time token estimation.
  */
 function initChatEventListeners() {
   $("#send-chat-message").on("click", function () {
     sendMessage();
+  });
+
+  // Add listener for the 'input' event to provide real-time feedback as the user types.
+  $("#chat-input").on("input", function () {
+    if (typeof updateChatInputTokenEstimate === "function") {
+      updateChatInputTokenEstimate();
+    }
   });
 
   $("#chat-input").on("keypress", function (e) {
