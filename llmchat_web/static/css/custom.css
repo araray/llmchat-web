@@ -249,11 +249,13 @@ body {
     flex-direction: column;
     flex-grow: 1;
     overflow: hidden;
+    min-height: 0;
 }
 .tab-pane-full-height {
     height: 100%;
     display: flex;
     flex-direction: column;
+    min-height: 0;
 }
 /* Workspace & RAG Tab Styling */
 .workspace-item,
@@ -427,4 +429,31 @@ body {
 .far,
 .fab {
     vertical-align: -0.125em;
+}
+
+/* 1. Ensure every flex column can shrink below its content size */
+.d-flex-fill-column,
+.tab-pane-full-height,
+.tab-content.flex-grow-1 {
+    min-height: 0 !important;
+}
+
+/* 2. Make the tab-content itself a flex column so its children’s flex rules apply */
+.tab-content.flex-grow-1 {
+    display: flex;
+    flex-direction: column;
+}
+
+/* 3. Guarantee the History messages list is allowed to shrink/grow and scroll */
+#history-context-message-list {
+    flex: 1 1 auto; /* shorthand for flex-grow:1; flex-shrink:1; flex-basis:auto; */
+    overflow-y: auto; /* you already have overflow-auto, but reinforcing here */
+}
+
+/* Override the inline overflow-y:hidden so tabs can scroll */
+#mainContentTabsContent {
+    overflow-y: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    min-height: 0 !important;
 }
