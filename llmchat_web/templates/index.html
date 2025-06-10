@@ -512,6 +512,13 @@ block head_extra %}
                         LLM, bypassing LLMCore's context assembly. Your message
                         from the main chat input will still be saved to history.
                     </p>
+                    <button
+                        id="btn-populate-workbench-from-context"
+                        class="btn btn-sm btn-secondary mb-2"
+                    >
+                        <i class="fas fa-file-import"></i> Populate from Current
+                        LLMCore Context
+                    </button>
                     <textarea
                         id="prompt-workbench-textarea"
                         class="form-control flex-grow-1"
