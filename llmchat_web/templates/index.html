@@ -869,7 +869,20 @@ block head_extra %}
             aria-labelledby="chat-input-tab-btn"
             tabindex="0"
         >
-            <div id="chat-input-area">
+            <!-- START: Prompt Shortcut Integration -->
+            <div
+                id="quick-prompt-bar"
+                class="p-2"
+                style="
+                    border-bottom: 1px solid var(--border-primary);
+                    display: none;
+                "
+            >
+                <!-- Favorite prompts will be populated here by JS -->
+                <small class="text-muted">Quick Prompts:</small>
+            </div>
+            <!-- END: Prompt Shortcut Integration -->
+            <div id="chat-input-area" class="p-2">
                 <div class="input-group">
                     <textarea
                         class="form-control"
@@ -877,6 +890,16 @@ block head_extra %}
                         rows="3"
                         placeholder="Type your message..."
                     ></textarea>
+                    <!-- START: Prompt Shortcut Button -->
+                    <button
+                        class="btn btn-outline-secondary"
+                        type="button"
+                        id="btn-show-prompt-shortcuts"
+                        title="Show Prompt Shortcuts"
+                    >
+                        <i class="fas fa-magic"></i>
+                    </button>
+                    <!-- END: Prompt Shortcut Button -->
                     <button
                         class="btn btn-primary"
                         type="button"
@@ -1583,6 +1606,52 @@ Loading logs...</pre
     </div>
 </div>
 <!-- END: New Modal for Editing Preset Items -->
+
+<!-- START: New Modal for Prompt Shortcuts -->
+<div
+    class="modal fade"
+    id="promptShortcutsModal"
+    tabindex="-1"
+    aria-labelledby="promptShortcutsModalLabel"
+    aria-hidden="true"
+>
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title" id="promptShortcutsModalLabel">
+                    <i class="fas fa-star"></i> Prompt Shortcuts
+                </h5>
+                <button
+                    type="button"
+                    class="btn-close btn-close-white"
+                    data-bs-dismiss="modal"
+                    aria-label="Close"
+                ></button>
+            </div>
+            <div class="modal-body">
+                <input
+                    type="text"
+                    class="form-control form-control-sm mb-3"
+                    id="prompt-shortcut-modal-search"
+                    placeholder="Search all presets..."
+                />
+                <div id="prompt-shortcut-modal-list" class="list-group">
+                    <!-- All presets will be listed here by JS -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-bs-dismiss="modal"
+                >
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- END: New Modal for Prompt Shortcuts -->
 
 <div
     id="toast-container"
