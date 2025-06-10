@@ -22,6 +22,7 @@ workspace_bp = Blueprint('workspace_bp', __name__, url_prefix='/api/sessions')
 rag_bp = Blueprint('rag_bp', __name__, url_prefix='/api/rag')
 ingest_bp = Blueprint('ingest_bp', __name__, url_prefix='/api/ingest')
 settings_bp = Blueprint('settings_bp', __name__, url_prefix='/api/settings')
+preset_bp = Blueprint('preset_bp', __name__, url_prefix='/api/presets')
 
 
 # --- Import route modules to register their routes with the blueprints ---
@@ -33,6 +34,7 @@ from . import workspace_routes
 from . import rag_routes
 from . import ingest_routes
 from . import settings_routes
+from . import preset_routes
 
 logger.info("Route modules imported and routes should be registered on their respective blueprints.")
 
@@ -45,6 +47,7 @@ all_blueprints = [
     rag_bp,
     ingest_bp,
     settings_bp,
+    preset_bp,
 ]
 
 logger.info(f"Defined and collected {len(all_blueprints)} blueprints for llmchat_web routes.")
