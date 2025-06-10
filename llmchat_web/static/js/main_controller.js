@@ -19,6 +19,7 @@
  * - rag_ui.js
  * - llm_settings_ui.js
  * - context_manager_ui.js
+ * - prompt_manager_ui.js
  * - prompt_template_ui.js
  * - ingestion_ui.js
  */
@@ -293,6 +294,7 @@ $(document).ready(function () {
     initRagEventListeners,
     initLlmSettingsEventListeners,
     initContextManagerEventListeners,
+    initPromptManagerEventListeners,
     initPromptTemplateEventListeners,
     initIngestionEventListeners,
   ].forEach((initFunc) => {
