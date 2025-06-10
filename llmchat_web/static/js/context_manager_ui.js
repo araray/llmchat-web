@@ -4,8 +4,9 @@
  * @file context_manager_ui.js
  * @description Handles UI logic for the Context Manager tab, including workspace items,
  * active context specification, history context selection, and context preview.
- * This version adds support for the "UI Managed" Prompt Workbench mode and
- * introduces a debounced function to update the global context token count in real-time.
+ * This version adds support for the "UI Managed" Prompt Workbench mode, including
+ * a button to populate it from the LLMCore context, and introduces a debounced
+ * function to update the global context token count in real-time.
  * Depends on utils.js and accesses/modifies global state from main_controller.js.
  */
 
@@ -576,17 +577,100 @@ function renderContextPreviewModal(data) {
 // =================================================================================
 
 /**
- * Initializes event listeners for the Context Manager tab.
+ * Initializes event listeners for the Context Manager tab. This now includes
+ * the handler for the "Populate from Current LLMCore Context" button.
  */
 function initContextManagerEventListeners() {
   // --- Mode Toggle ---
   $("#context-mode-toggle").on("change", switchContextManagerMode);
 
-  // --- Prompt Workbench Listener ---
+  // --- Prompt Workbench Listeners ---
   $("#prompt-workbench-textarea").on(
     "input",
     updatePromptWorkbenchTokenEstimate,
   );
+
+  /**
+   * Handles the click event for the 'Populate from Current LLMCore Context' button.
+   * It fetches the context that LLMCore would generate for the current chat state
+   * (including main chat input, RAG settings, etc.), formats it into a readable
+   * string, and populates the Prompt Workbench textarea with this content.
+   */
+  $("#btn-populate-workbench-from-context").on("click", function () {
+    if (!window.currentLlmSessionId) {
+      showToast(
+        "Error",
+        "No active session to populate context from.",
+        "danger",
+      );
+      return;
+    }
+
+    // This mimics the payload for the regular preview button to get the most
+    // accurate context LLMCore would generate. It includes the query from the *main chat input*,
+    // as that's what a user would imminently send.
+    const payload = {
+      current_query: $("#chat-input").val().trim() || null,
+      staged_items: window.stagedContextItems || [],
+    };
+
+    console.log(
+      "CTX_MAN_UI: Populating workbench from LLMCore context with payload:",
+      payload,
+    );
+    showToast("Info", "Fetching LLMCore context...", "info");
+
+    $.ajax({
+      url: `/api/sessions/${window.currentLlmSessionId}/context/preview`,
+      type: "POST",
+      contentType: "application/json",
+      data: JSON.stringify(payload),
+      dataType: "json",
+      success: function (data) {
+        if (
+          data &&
+          data.prepared_messages &&
+          data.prepared_messages.length > 0
+        ) {
+          // Format the prepared messages array into a single, readable string
+          const formattedMessages = data.prepared_messages
+            .map((msg) => {
+              const role = msg.role.toUpperCase();
+              const content = msg.content;
+              return `--- ROLE: ${role} ---\n\n${content}`;
+            })
+            .join("\n\n\n");
+
+          // Set the formatted string as the value of the workbench and trigger the
+          // input event to update the token counter.
+          $("#prompt-workbench-textarea")
+            .val(formattedMessages)
+            .trigger("input");
+          showToast(
+            "Success",
+            "Prompt Workbench populated from LLMCore context.",
+            "success",
+          );
+        } else {
+          showToast(
+            "Warning",
+            "Could not populate workbench: No prepared messages returned from context preview.",
+            "warning",
+          );
+        }
+      },
+      error: function (jqXHR) {
+        const errorMsg =
+          jqXHR.responseJSON?.error ||
+          "Unknown error fetching context preview.";
+        showToast(
+          "Error",
+          `Failed to populate workbench: ${escapeHtml(errorMsg)}`,
+          "danger",
+        );
+      },
+    });
+  });
 
   // --- LLMCore Managed UI Event Listeners ---
   $("#context-manager-tab-btn").on("shown.bs.tab", function (e) {
@@ -616,10 +700,6 @@ function initContextManagerEventListeners() {
     updateFullContextPreview();
   });
 
-  // ... (existing listeners for workspace, staging, history, preview) ...
-  // The following listeners remain the same as they operate on the LLMCore Managed UI.
-  // A new listener is added for the "Add to Workbench" button.
-
   $("#workspace-items-list").on("click", ".btn-add-to-workbench", function () {
     const $itemDiv = $(this).closest(".workspace-item");
     const itemId = $itemDiv.data("item-id");
@@ -640,7 +720,6 @@ function initContextManagerEventListeners() {
           `Content from item ${itemId} has been added.`,
           "success",
         );
-        // Optional: Switch to UI Managed mode if not already active
         if (!$("#context-mode-toggle").is(":checked")) {
           $("#context-mode-toggle").prop("checked", true).trigger("change");
         }
@@ -676,9 +755,6 @@ function initContextManagerEventListeners() {
     },
   );
 
-  // ... (All other existing listeners from the previous file version go here) ...
-  // Duplicating them for completeness.
-
   $("#form-add-text-snippet").on("submit", function (e) {
     e.preventDefault();
     const content = $("#text-snippet-content").val().trim();
@@ -701,7 +777,7 @@ function initContextManagerEventListeners() {
         );
         $("#form-add-text-snippet")[0].reset();
         fetchAndDisplayWorkspaceItems();
-        updateFullContextPreview(); // Trigger update on change
+        updateFullContextPreview();
       },
       error: function (jqXHR) {
         const errorMsg =
@@ -737,7 +813,7 @@ function initContextManagerEventListeners() {
         );
         $("#form-add-file-by-path")[0].reset();
         fetchAndDisplayWorkspaceItems();
-        updateFullContextPreview(); // Trigger update on change
+        updateFullContextPreview();
       },
       error: function (jqXHR) {
         const errorMsg =
@@ -805,7 +881,7 @@ function initContextManagerEventListeners() {
                     !(si.type === "workspace_item" && si.id_ref === itemId),
                 );
                 renderStagedContextItems();
-                updateFullContextPreview(); // Trigger update on change
+                updateFullContextPreview();
               },
               error: function () {
                 showToast("Error", "Error removing item.", "danger");
@@ -838,7 +914,6 @@ function initContextManagerEventListeners() {
   $(
     "#btn-stage-from-workspace, #btn-stage-from-history, #btn-stage-new-file, #btn-stage-new-text",
   ).on("click", function () {
-    // This is simplified for brevity. A real implementation might open modals to select items.
     const actionId = $(this).attr("id");
     if (actionId === "btn-stage-new-file") {
       const filePath = prompt("Enter server path to file to stage:");
@@ -892,7 +967,7 @@ function initContextManagerEventListeners() {
         if (newContent !== null) {
           item.content = newContent;
           renderStagedContextItems();
-          updateFullContextPreview(); // Trigger update on change
+          updateFullContextPreview();
           showToast("Updated", `Staged item ${specItemId} updated.`, "info");
         }
       } else {
@@ -940,7 +1015,6 @@ function initContextManagerEventListeners() {
     });
   });
 
-  // Listen to changes on history selection checkboxes
   $("#history-context-message-list").on(
     "change",
     ".form-check-input",
