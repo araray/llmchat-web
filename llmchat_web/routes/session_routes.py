@@ -1,7 +1,7 @@
 # llmchat_web/routes/session_routes.py
 """
 Flask routes for session management in the llmchat-web application.
-Handles listing, creating, loading, and deleting chat sessions,
+Handles listing, creating, loading, deleting, and renaming chat sessions,
 as well as operations on messages within sessions.
 It also includes an endpoint for updating client-specific session metadata.
 """
@@ -248,6 +248,57 @@ async def delete_session_route(session_id_to_delete: str) -> Any:
     except Exception as e_unexp:
         logger.error(f"Unexpected error deleting session {session_id_to_delete}: {e_unexp}", exc_info=True)
         return jsonify({"error": "An unexpected server error occurred while deleting the session."}), 500
+
+
+@session_bp.route("/<session_id>/rename", methods=["POST"])
+@async_to_sync_in_flask
+async def rename_session_route(session_id: str) -> Any:
+    """
+    Renames a persistent session in LLMCore.
+    This endpoint facilitates updating the user-facing name of a session.
+
+    Args:
+        session_id (str): The unique identifier of the session to be renamed.
+
+    JSON Payload:
+        new_name (str): The new name to be assigned to the session.
+
+    Returns:
+        A JSON response indicating success or failure. On success, it returns
+        a message and a 200 OK status. On failure (e.g., session not found,
+        invalid payload, or backend error), it returns an error message with an
+        appropriate HTTP status code (400, 404, 500).
+    """
+    if not llmcore_instance:
+        logger.error(f"Attempted to rename session {session_id}, but LLM service is not available.")
+        return jsonify({"error": "LLM service not available."}), 503
+
+    data = request.json
+    if not data or "new_name" not in data or not isinstance(data["new_name"], str) or not data["new_name"].strip():
+        logger.warning(f"Rename session {session_id} called with invalid or missing 'new_name' in payload.")
+        return jsonify({"error": "Invalid or missing 'new_name' in request payload."}), 400
+
+    new_name = data["new_name"].strip()
+    logger.info(f"Attempting to rename session '{session_id}' to '{new_name}'.")
+
+    try:
+        success = await llmcore_instance.update_session_name(session_id, new_name)
+        if success:
+            logger.info(f"Successfully renamed session '{session_id}' to '{new_name}'.")
+            return jsonify({"message": f"Session '{session_id}' renamed to '{new_name}' successfully."})
+        else:
+            # This case is less likely if SessionNotFoundError is caught, but serves as a fallback.
+            logger.warning(f"Failed to rename session '{session_id}'. LLMCore returned false, session may not exist.")
+            return jsonify({"error": "Session not found or update failed in storage."}), 404
+    except SessionNotFoundError:
+        logger.warning(f"Session '{session_id}' not found when trying to rename.")
+        return jsonify({"error": "Session not found."}), 404
+    except LLMCoreError as e:
+        logger.error(f"LLMCore error renaming session {session_id}: {e}", exc_info=True)
+        return jsonify({"error": f"Failed to rename session: {str(e)}"}), 500
+    except Exception as e_unexp:
+        logger.error(f"Unexpected error renaming session {session_id}: {e_unexp}", exc_info=True)
+        return jsonify({"error": "An unexpected server error occurred while renaming the session."}), 500
 
 
 @session_bp.route("/<session_id>/messages/<message_id>", methods=["DELETE"])
