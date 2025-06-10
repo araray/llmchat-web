@@ -5,9 +5,9 @@
  * @description Main JavaScript controller for the llmchat-web interface.
  * This file initializes various UI modules and handles global state management,
  * initial status fetching, session list display, and other top-level UI interactions.
- * This version includes logic for session renaming, fixes for session creation UI
- * and theme management, and corrects the logic for displaying chat history when a
- * session is loaded.
+ * This version includes logic for session renaming, fixes for session creation UI,
+ * theme management, initialization of the prompt shortcut bar, and corrects the
+ * logic for displaying chat history when a session is loaded.
  *
  * Global state variables (e.g., window.currentLlmSettings) are initialized in utils.js.
  * This script populates them based on backend status and user interactions.
@@ -19,7 +19,7 @@
  * - rag_ui.js
  * - llm_settings_ui.js
  * - context_manager_ui.js
- * - prompt_manager_ui.js
+ * - prompt_manager_ui.js (provides prompt management and shortcut logic)
  * - prompt_template_ui.js
  * - ingestion_ui.js
  */
@@ -300,6 +300,11 @@ $(document).ready(function () {
   ].forEach((initFunc) => {
     if (typeof initFunc === "function") initFunc();
   });
+
+  // After all modules are initialized, render the quick prompt bar from localStorage favorites
+  if (typeof renderQuickPromptBar === "function") {
+    renderQuickPromptBar();
+  }
 
   // --- Theme Switcher Event Listener ---
   $(".dropdown-menu a[data-theme]").on("click", function (e) {
