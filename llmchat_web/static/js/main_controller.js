@@ -5,8 +5,9 @@
  * @description Main JavaScript controller for the llmchat-web interface.
  * This file initializes various UI modules and handles global state management,
  * initial status fetching, session list display, and other top-level UI interactions.
- * This version includes fixes for session creation UI and theme management, and corrects
- * the logic for displaying chat history when a session is loaded.
+ * This version includes logic for session renaming, fixes for session creation UI
+ * and theme management, and corrects the logic for displaying chat history when a
+ * session is loaded.
  *
  * Global state variables (e.g., window.currentLlmSettings) are initialized in utils.js.
  * This script populates them based on backend status and user interactions.
@@ -203,7 +204,8 @@ function fetchAndUpdateInitialStatus() {
 }
 
 /**
- * Fetches and displays the list of saved sessions, including per-session delete icons.
+ * Fetches and displays the list of saved sessions.
+ * Now includes buttons for renaming and deleting each session.
  * Highlights the currentLlmSessionId if active.
  */
 function fetchAndDisplaySessions() {
@@ -212,21 +214,28 @@ function fetchAndDisplaySessions() {
       const $sessionList = $("#session-list").empty();
       if (sessions && sessions.length > 0) {
         sessions.forEach(function (session) {
-          const deleteButtonHtml = `
-                        <button class="btn btn-sm btn-outline-danger btn-delete-session-item" data-session-id="${escapeHtml(session.id)}" title="Delete Session">
-                            <i class="fas fa-trash-alt fa-xs"></i>
-                        </button>`;
+          const buttonsHtml = `
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-sm btn-outline-secondary btn-rename-session-item" data-session-id="${escapeHtml(session.id)}" title="Rename Session">
+                                <i class="fas fa-pencil-alt fa-xs"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger btn-delete-session-item" data-session-id="${escapeHtml(session.id)}" title="Delete Session">
+                                <i class="fas fa-trash-alt fa-xs"></i>
+                            </button>
+                        </div>`;
+
           const $sessionItem = $("<a>", {
             href: "#",
             class:
               "list-group-item list-group-item-action d-flex justify-content-between align-items-center",
             "data-session-id": session.id,
             html: `<div>
-                                   <div class="fw-bold">${escapeHtml(session.name) || escapeHtml(session.id.substring(0, 15)) + "..."}</div>
+                                   <div class="fw-bold session-name-display">${escapeHtml(session.name) || escapeHtml(session.id.substring(0, 15)) + "..."}</div>
                                    <small class="text-muted">Messages: ${session.message_count || 0}</small>
                                </div>
-                               ${deleteButtonHtml}`,
+                               ${buttonsHtml}`,
           });
+
           if (session.id === window.currentLlmSessionId) {
             $sessionItem.addClass("active");
           }
@@ -437,6 +446,45 @@ $(document).ready(function () {
       .fail(function () {
         showToast("Error", "Failed to load session.", "danger");
       });
+  });
+
+  // --- Per-Session Rename Button ---
+  $("#session-list").on("click", ".btn-rename-session-item", function (e) {
+    e.preventDefault();
+    e.stopPropagation(); // Prevent the session load event from firing
+
+    const sessionIdToRename = $(this).data("session-id");
+    const currentName = $(this)
+      .closest(".list-group-item")
+      .find(".session-name-display")
+      .text();
+
+    if (!sessionIdToRename) return;
+
+    const newName = prompt(
+      "Enter the new name for the session:",
+      currentName.endsWith("...") ? "" : currentName,
+    );
+
+    if (newName && newName.trim() !== "" && newName.trim() !== currentName) {
+      apiRenameSession(sessionIdToRename, newName.trim())
+        .done(function (response) {
+          showToast(
+            "Success",
+            response.message || "Session renamed successfully.",
+            "success",
+          );
+          fetchAndDisplaySessions(); // Refresh the list to show the new name
+        })
+        .fail(function (jqXHR) {
+          const errorMsg =
+            jqXHR.responseJSON?.error || "Failed to rename session.";
+          showToast("Error", errorMsg, "danger");
+        });
+    } else if (newName !== null) {
+      // User didn't cancel but entered empty or same name
+      showToast("Info", "Session name was not changed.", "info");
+    }
   });
 
   // --- Per-Session Delete Button ---
