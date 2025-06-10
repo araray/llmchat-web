@@ -355,7 +355,12 @@ $(document).ready(function () {
           return;
         }
 
-        // --- START: Targeted UI Update on Session Load ---
+        // --- START: FIX-1.4-REVISED: Robust UI Update on Session Load ---
+        console.log(
+          `MAIN_CTRL: Loading session ${response.session_data.id}. Starting UI updates.`,
+        );
+
+        // 1. Update all global state variables first. This is a safe, non-DOM operation.
         window.currentLlmSessionId = response.session_data.id;
         const settings = response.applied_settings;
         window.currentLlmSettings = {
@@ -370,38 +375,20 @@ $(document).ready(function () {
           filter: settings.rag_filter,
         };
         window.currentPromptTemplateValues = settings.prompt_template_values;
-        window.stagedContextItems = [];
+        window.stagedContextItems = []; // Staged items are transient, so clear them on load.
+        window.lastBaseContextUsage = response.context_usage; // Can be null
+        console.log("MAIN_CTRL: Global state updated for loaded session.");
 
+        // 2. Update all peripheral UI components that rely on the new global state.
+        // This is done before touching the chat panel to avoid race conditions or resets.
         updateChatPanelState(true);
-
-        $("#chat-messages").empty();
-        if (
-          response.session_data.messages &&
-          response.session_data.messages.length > 0
-        ) {
-          response.session_data.messages.forEach((msg) => {
-            if (typeof appendMessageToChat === "function") {
-              appendMessageToChat(msg.content, msg.role, false, msg.id);
-            }
-          });
-        } else {
-          $("#chat-messages").append(
-            '<p class="text-muted text-center small p-3">This session is empty.</p>',
-          );
-        }
-
-        // Update all UI components to reflect the new global state
         $("#status-provider").text(
           window.currentLlmSettings.providerName || "N/A",
         );
         $("#status-model").text(window.currentLlmSettings.modelName || "N/A");
 
-        // Update context usage display with data from load response
-        if (typeof updateContextUsageDisplay === "function") {
-          window.lastBaseContextUsage = response.context_usage; // Can be null
+        if (typeof updateContextUsageDisplay === "function")
           updateContextUsageDisplay(window.lastBaseContextUsage);
-        }
-
         if (typeof updateRagControlsState === "function")
           updateRagControlsState();
         if (typeof fetchAndPopulateRagCollections === "function")
@@ -414,13 +401,38 @@ $(document).ready(function () {
           fetchAndDisplayPromptTemplateValues();
         if (typeof renderStagedContextItems === "function")
           renderStagedContextItems();
+        console.log("MAIN_CTRL: Peripheral UI components updated.");
 
+        // 3. Refresh the session list to correctly highlight the newly active session.
         fetchAndDisplaySessions();
+        console.log("MAIN_CTRL: Session list refreshed.");
 
+        // 4. Finally, render the chat messages. This is the last and most critical DOM operation.
+        const $chatPanel = $("#chat-messages");
+        $chatPanel.empty();
         console.log(
-          `MAIN_CTRL: Successfully loaded session ${response.session_data.id} and updated UI.`,
+          `MAIN_CTRL: Chat panel emptied. Preparing to render ${response.session_data.messages.length} messages.`,
         );
-        // --- END: Targeted UI Update on Session Load ---
+
+        if (
+          response.session_data.messages &&
+          response.session_data.messages.length > 0
+        ) {
+          response.session_data.messages.forEach((msg) => {
+            if (typeof appendMessageToChat === "function") {
+              appendMessageToChat(msg.content, msg.role, false, msg.id);
+            }
+          });
+          console.log(
+            `MAIN_CTRL: Finished rendering messages. Final child count: ${$chatPanel.children().length}`,
+          );
+        } else {
+          $chatPanel.append(
+            '<p class="text-muted text-center small p-3">This session is empty.</p>',
+          );
+          console.log("MAIN_CTRL: Rendered 'session is empty' message.");
+        }
+        // --- END: FIX-1.4-REVISED ---
       })
       .fail(function () {
         showToast("Error", "Failed to load session.", "danger");
