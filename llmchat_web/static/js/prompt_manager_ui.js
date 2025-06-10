@@ -2,9 +2,9 @@
 
 /**
  * @file prompt_manager_ui.js
- * @description Handles all UI logic for the Prompt Management tab.
+ * @description Handles all UI logic for the Prompt Management tab and prompt shortcuts.
  * This includes fetching, displaying, creating, updating, and deleting
- * context presets and their individual items.
+ * context presets, as well as managing favorites and applying presets to the chat UI.
  *
  * It depends on utils.js for helper functions like showToast() and escapeHtml().
  */
@@ -15,6 +15,8 @@ let currentlyEditingPreset = null;
 let presetEditorItems = [];
 // State variable to track the item being edited in the modal.
 let editingItemId = null;
+// Key for localStorage
+const FAVORITE_PRESETS_KEY = "llmchat_favorite_presets";
 
 // =================================================================================
 // SECTION: Preset List Management
@@ -63,6 +65,70 @@ function fetchAndDisplayPresets() {
 }
 
 // =================================================================================
+// SECTION: Favorite Preset Management (for Shortcuts)
+// =================================================================================
+
+/**
+ * Retrieves the list of favorite preset names from localStorage.
+ * @returns {Array<string>} An array of favorite preset names.
+ */
+function getFavoritePresets() {
+  try {
+    return JSON.parse(localStorage.getItem(FAVORITE_PRESETS_KEY)) || [];
+  } catch (e) {
+    console.error("Failed to parse favorite presets from localStorage:", e);
+    return [];
+  }
+}
+
+/**
+ * Saves the list of favorite preset names to localStorage.
+ * @param {Array<string>} favorites - The array of favorite preset names to save.
+ */
+function setFavoritePresets(favorites) {
+  try {
+    localStorage.setItem(FAVORITE_PRESETS_KEY, JSON.stringify(favorites));
+  } catch (e) {
+    console.error("Failed to save favorite presets to localStorage:", e);
+  }
+}
+
+/**
+ * Toggles the favorite status of a given preset.
+ * @param {string} presetName - The name of the preset to toggle.
+ */
+function toggleFavoritePreset(presetName) {
+  if (!presetName) return;
+  let favorites = getFavoritePresets();
+  const index = favorites.indexOf(presetName);
+  if (index > -1) {
+    favorites.splice(index, 1); // Unfavorite
+  } else {
+    favorites.push(presetName); // Favorite
+  }
+  setFavoritePresets(favorites);
+  updateFavoriteStarUI(presetName);
+  renderQuickPromptBar(); // Re-render the bar after toggling
+}
+
+/**
+ * Updates the visual state of the favorite star icon in the editor.
+ * @param {string} presetName - The name of the currently displayed preset.
+ */
+function updateFavoriteStarUI(presetName) {
+  const favorites = getFavoritePresets();
+  const isFavorite = favorites.includes(presetName);
+  const $star = $("#btn-toggle-favorite-preset");
+  if (isFavorite) {
+    $star.removeClass("far").addClass("fas text-warning");
+    $star.attr("title", "Remove from favorites");
+  } else {
+    $star.removeClass("fas text-warning").addClass("far");
+    $star.attr("title", "Add to favorites");
+  }
+}
+
+// =================================================================================
 // SECTION: Preset Editor UI
 // =================================================================================
 
@@ -95,6 +161,7 @@ function displayPresetForEditing(preset) {
   $("#prompt-preset-description").val(preset.description || "");
 
   renderPresetItemsList();
+  updateFavoriteStarUI(preset.name);
   // TODO: Render template values once that feature is added.
 
   showPresetEditor();
@@ -112,6 +179,7 @@ function clearAndShowNewPresetForm() {
   $("#prompt-preset-description").val("");
 
   renderPresetItemsList();
+  updateFavoriteStarUI(null); // Reset star to non-favorite state
   // TODO: Clear template values UI once added.
 
   $("#prompt-preset-list .list-group-item.active").removeClass("active");
@@ -205,6 +273,137 @@ function openEditPresetItemModal(itemId) {
 }
 
 // =================================================================================
+// SECTION: Prompt Shortcut Rendering and Application
+// =================================================================================
+
+/**
+ * Renders the Quick Prompt Bar with buttons for favorited presets.
+ */
+function renderQuickPromptBar() {
+  const favorites = getFavoritePresets();
+  const $bar = $("#quick-prompt-bar");
+  // Clear everything except the "Quick Prompts:" label
+  $bar.find(".quick-prompt-btn").remove();
+
+  if (favorites.length > 0) {
+    favorites.slice(0, 10).forEach((name) => {
+      // Show up to 10 favorites
+      const $button = $("<button>", {
+        class:
+          "btn btn-sm btn-outline-secondary me-1 mb-1 quick-prompt-btn apply-prompt-shortcut",
+        text: escapeHtml(name),
+        "data-preset-name": name,
+        title: `Apply preset: ${escapeHtml(name)}`,
+      });
+      $bar.append($button);
+    });
+    $bar.show();
+  } else {
+    $bar.hide();
+  }
+  console.log("Prompt Manager UI: Quick Prompt Bar updated.");
+}
+
+/**
+ * Fetches all presets and populates the list in the shortcuts modal.
+ */
+function populateShortcutsModal() {
+  const $list = $("#prompt-shortcut-modal-list");
+  $list.html('<p class="text-muted small p-2">Loading presets...</p>');
+  $.ajax({
+    url: "/api/presets",
+    type: "GET",
+    dataType: "json",
+  })
+    .done(function (presets) {
+      $list.empty();
+      if (presets && presets.length > 0) {
+        presets
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .forEach(function (preset) {
+            const $item = $(`
+                    <a href="#" class="list-group-item list-group-item-action apply-prompt-shortcut" data-preset-name="${escapeHtml(preset.name)}">
+                      ${escapeHtml(preset.name)}
+                      <p class="mb-1 small text-muted">${escapeHtml(preset.description || "")}</p>
+                    </a>
+                `);
+            $list.append($item);
+          });
+      } else {
+        $list.html('<p class="text-muted small p-2">No presets found.</p>');
+      }
+    })
+    .fail(function () {
+      $list.html(
+        '<p class="text-danger small p-2">Failed to load presets.</p>',
+      );
+    });
+}
+
+/**
+ * Fetches a preset by name and applies its content to the chat and workbench inputs.
+ * @param {string} presetName - The name of the preset to apply.
+ */
+function applyPromptPreset(presetName) {
+  if (!presetName) return;
+  console.log(`PROMPT_UI: Applying preset: ${presetName}`);
+
+  $.ajax({
+    url: `/api/presets/${encodeURIComponent(presetName)}`,
+    type: "GET",
+  })
+    .done(function (preset) {
+      // As per spec, handle placeholders later. For now, just join content.
+      let fullContent = preset.items
+        .map((item) => {
+          if (item.type === "preset_file_reference") {
+            return `[Content from file: ${item.source_identifier || "unknown path"}]`; // Placeholder for now
+          }
+          return item.content || "";
+        })
+        .join("\n\n---\n\n");
+
+      // The spec requires setting the chat input to a summary and the workbench to the full content.
+      // For simplicity here, we'll put a summary in chat and full content in workbench.
+      let summaryForChatInput =
+        fullContent.substring(0, 250) + (fullContent.length > 250 ? "..." : "");
+
+      $("#chat-input").val(summaryForChatInput);
+      $("#prompt-workbench-textarea").val(fullContent).trigger("input");
+
+      // CRUCIALLY: Switch to UI Managed mode and show the correct tab.
+      if (!$("#context-mode-toggle").is(":checked")) {
+        $("#context-mode-toggle").prop("checked", true).trigger("change");
+      }
+      const contextTab = new bootstrap.Tab(
+        document.getElementById("context-manager-tab-btn"),
+      );
+      contextTab.show();
+
+      showToast(
+        "Success",
+        `Preset '${presetName}' applied to Prompt Workbench.`,
+        "success",
+      );
+
+      // Close the shortcuts modal if it's open.
+      const shortcutsModal = bootstrap.Modal.getInstance(
+        document.getElementById("promptShortcutsModal"),
+      );
+      if (shortcutsModal) {
+        shortcutsModal.hide();
+      }
+    })
+    .fail(function () {
+      showToast(
+        "Error",
+        `Failed to load and apply preset '${presetName}'.`,
+        "danger",
+      );
+    });
+}
+
+// =================================================================================
 // SECTION: API Call Handlers
 // =================================================================================
 
@@ -222,10 +421,6 @@ function savePreset() {
   }
 
   const isCreating = !originalName;
-  const url = isCreating
-    ? "/api/presets"
-    : `/api/presets/${encodeURIComponent(originalName)}`;
-  const method = isCreating ? "POST" : "PUT";
 
   const payload = {
     name: newName,
@@ -234,7 +429,8 @@ function savePreset() {
     metadata: {}, // Placeholder for future use
   };
 
-  // If we're renaming, we need to handle that via the dedicated endpoint first.
+  // If we're renaming, we must delete the old and create the new, or use a dedicated rename endpoint.
+  // The spec defines a dedicated rename endpoint. Let's use it.
   if (!isCreating && originalName !== newName) {
     $.ajax({
       url: `/api/presets/${encodeURIComponent(originalName)}/rename`,
@@ -243,8 +439,9 @@ function savePreset() {
       data: JSON.stringify({ new_name: newName }),
     })
       .done(function () {
-        // After successful rename, save the content.
+        // After successful rename, save the content to the new name.
         updatePresetContent(newName, payload);
+        renderQuickPromptBar(); // Favorites might need updating
       })
       .fail(function (jqXHR) {
         const errorMsg =
@@ -252,13 +449,37 @@ function savePreset() {
         showToast("Error", errorMsg, "danger");
       });
   } else {
-    // Just updating content, not renaming.
-    updatePresetContent(newName, payload);
+    // Creating a new preset or updating an existing one without renaming
+    const url = isCreating
+      ? "/api/presets"
+      : `/api/presets/${encodeURIComponent(originalName)}`;
+    const method = isCreating ? "POST" : "PUT";
+    $.ajax({
+      url: url,
+      type: method,
+      contentType: "application/json",
+      data: JSON.stringify(payload),
+    })
+      .done(function (savedPreset) {
+        showToast(
+          "Success",
+          `Preset '${savedPreset.name}' saved successfully.`,
+          "success",
+        );
+        fetchAndDisplayPresets();
+        displayPresetForEditing(savedPreset); // Refresh editor with saved data
+        renderQuickPromptBar(); // Favorites might need updating
+      })
+      .fail(function (jqXHR) {
+        const errorMsg = jqXHR.responseJSON?.error || "Failed to save preset.";
+        showToast("Error", errorMsg, "danger");
+      });
   }
 }
 
 /**
  * Helper function to perform the PUT request for updating preset content.
+ * This is now wrapped into the main savePreset logic to handle renames correctly.
  * @param {string} name - The name of the preset to update.
  * @param {object} payload - The full preset data.
  */
@@ -272,7 +493,7 @@ function updatePresetContent(name, payload) {
     .done(function (updatedPreset) {
       showToast(
         "Success",
-        `Preset '${updatedPreset.name}' saved successfully.`,
+        `Preset '${updatedPreset.name}' content saved successfully.`,
         "success",
       );
       fetchAndDisplayPresets();
@@ -312,6 +533,7 @@ function deletePreset() {
               response.message || "Preset deleted.",
               "success",
             );
+            toggleFavoritePreset(presetName); // Remove from favorites if it was favorited
             fetchAndDisplayPresets();
             showPresetWelcomePane();
           })
@@ -363,6 +585,27 @@ function initPromptManagerEventListeners() {
 
   // Handle "Delete" button click in the editor.
   $("#btn-delete-prompt-preset").on("click", deletePreset);
+
+  // Add favorite star icon to editor header dynamically
+  if ($("#btn-toggle-favorite-preset").length === 0) {
+    const $starIcon = $("<i>", {
+      id: "btn-toggle-favorite-preset",
+      class: "far fa-star ms-2",
+      style: "cursor: pointer;",
+      title: "Add to favorites",
+    });
+    $("#prompt-preset-editor-pane h5").append($starIcon);
+  }
+
+  // Handle "Favorite" star click.
+  $("#prompt-preset-editor-pane").on(
+    "click",
+    "#btn-toggle-favorite-preset",
+    function () {
+      const presetName = $("#prompt-preset-editor-original-name").val();
+      toggleFavoritePreset(presetName);
+    },
+  );
 
   // Handle search input filtering.
   $("#prompt-preset-search-input").on("keyup", function () {
@@ -444,6 +687,32 @@ function initPromptManagerEventListeners() {
     bootstrap.Modal.getInstance(
       document.getElementById("promptPresetItemModal"),
     ).hide();
+  });
+
+  // --- Prompt Shortcut Listeners ---
+  // Handle click on the "magic wand" button to show the full shortcut modal
+  $("#btn-show-prompt-shortcuts").on("click", function () {
+    populateShortcutsModal();
+    const shortcutsModal = new bootstrap.Modal(
+      document.getElementById("promptShortcutsModal"),
+    );
+    shortcutsModal.show();
+  });
+
+  // Handle clicks on quick bar buttons or modal links to apply presets
+  $("body").on("click", ".apply-prompt-shortcut", function (e) {
+    e.preventDefault();
+    const presetName = $(this).data("preset-name");
+    applyPromptPreset(presetName);
+  });
+
+  // Filter list in the shortcut modal
+  $("#prompt-shortcut-modal-search").on("keyup", function () {
+    const searchTerm = $(this).val().toLowerCase();
+    $("#prompt-shortcut-modal-list .list-group-item").each(function () {
+      const presetName = $(this).data("preset-name").toLowerCase();
+      $(this).toggle(presetName.includes(searchTerm));
+    });
   });
 
   console.log("Prompt Manager UI event listeners initialized.");
