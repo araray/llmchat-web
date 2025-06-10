@@ -3,7 +3,9 @@
 /**
  * @file session_api.js
  * @description Functions for making API calls related to session management.
- * These functions return jQuery AJAX promises.
+ * This module provides a clear, centralized interface for all session-related
+ * backend communications, returning jQuery AJAX promises for easy chaining of
+ * asynchronous operations.
  */
 
 /**
@@ -21,6 +23,7 @@ function apiFetchSessions() {
 
 /**
  * Requests the creation of a new session context from the backend.
+ * This prepares the server-side state for a new conversation.
  * @returns {Promise} jQuery AJAX promise.
  */
 function apiCreateNewSession() {
@@ -56,6 +59,25 @@ function apiDeleteSession(sessionId) {
   return $.ajax({
     url: `/api/sessions/${sessionId}`,
     type: "DELETE",
+    dataType: "json",
+  });
+}
+
+/**
+ * Requests to rename a session from the backend.
+ * @param {string} sessionId - The ID of the session to rename.
+ * @param {string} newName - The new name for the session.
+ * @returns {Promise} jQuery AJAX promise for the rename operation.
+ */
+function apiRenameSession(sessionId, newName) {
+  console.log(
+    `API: Requesting to rename session: ${sessionId} to "${newName}"`,
+  );
+  return $.ajax({
+    url: `/api/sessions/${sessionId}/rename`,
+    type: "POST",
+    contentType: "application/json",
+    data: JSON.stringify({ new_name: newName }),
     dataType: "json",
   });
 }
