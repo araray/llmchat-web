@@ -457,3 +457,19 @@ body {
     flex-direction: column !important;
     min-height: 0 !important;
 }
+
+.staged-item-dropped {
+    opacity: 0.6;
+    border-left: 3px solid #dc3545; /* Bootstrap's danger color */
+    background-image: repeating-linear-gradient(
+        -45deg,
+        transparent,
+        transparent 5px,
+        rgba(255, 255, 255, 0.02) 5px,
+        rgba(255, 255, 255, 0.02) 10px
+    );
+}
+
+.staged-item-dropped .staged-item-header {
+    font-style: italic;
+}

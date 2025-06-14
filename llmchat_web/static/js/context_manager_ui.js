@@ -7,6 +7,8 @@
  * This version adds support for the "UI Managed" Prompt Workbench mode, including
  * a button to populate it from the LLMCore context, and introduces a debounced
  * function to update the global context token count in real-time.
+ * This version also introduces a critical fix to visually indicate when a staged
+ * context item has been truncated or dropped by the backend during final context assembly.
  * Depends on utils.js and accesses/modifies global state from main_controller.js.
  */
 
@@ -15,36 +17,68 @@
 let fullContextPreviewDebounceTimer;
 
 // =================================================================================
-// SECTION: Full Context Preview (for Top Bar Token Count)
+// SECTION: Full Context Preview & State Synchronization
 // =================================================================================
 
 /**
- * Fetches a full context preview from the backend to get an accurate token count.
- * This function is debounced to avoid excessive API calls during rapid UI changes.
- * It updates the main context usage display in the top bar.
- * Relies on global state variables for session ID, staged items, and all settings.
+ * **FIX**: Extracts the IDs of all context items that were actually included in the final prompt.
+ * It parses the special system messages that LLMCore uses to wrap context items.
+ * This is crucial for determining which staged items were dropped due to token limits.
+ * @param {Array<Object>} preparedMessages - The `prepared_messages` array from the context preview API response.
+ * @returns {Set<string>} A Set containing the IDs of all included workspace and history message items.
+ */
+function getIncludedItemIdsFromPreview(preparedMessages) {
+  const includedIds = new Set();
+  if (!preparedMessages) {
+    return includedIds;
+  }
+
+  // Regex to find "Staged Context Item (ID: ...)" or similar markers.
+  // This needs to be robust to match what LLMCore actually produces.
+  const idPattern = /--- Staged Context Item \(ID: ([\w-]+)/;
+  const historyIdPattern = /--- Message from History \(ID: ([\w-]+)/;
+
+  preparedMessages.forEach((msg) => {
+    if (msg.role === "system" && msg.content) {
+      let match = msg.content.match(idPattern);
+      if (match && match[1]) {
+        includedIds.add(match[1]);
+      }
+      match = msg.content.match(historyIdPattern);
+      if (match && match[1]) {
+        includedIds.add(match[1]);
+      }
+    }
+  });
+  console.log(
+    "CTX_MAN_UI: Identified included context item IDs from preview:",
+    includedIds,
+  );
+  return includedIds;
+}
+
+/**
+ * **MODIFIED**: Fetches a full context preview from the backend to get an accurate token count
+ * and determine which staged items were actually included.
+ * This function is debounced to avoid excessive API calls. It is now the
+ * primary driver for updating both the token counter and the visual state of staged items.
  */
 function updateFullContextPreview() {
   clearTimeout(fullContextPreviewDebounceTimer);
   fullContextPreviewDebounceTimer = setTimeout(async () => {
     if (!window.currentLlmSessionId) {
-      // Don't try to update if there's no session active
       return;
     }
 
-    // Don't run this preview if in UI Managed mode, as the context is different.
     const isUIManaged = $("#context-mode-toggle").is(":checked");
     if (isUIManaged) {
+      updatePromptWorkbenchTokenEstimate(); // In UI mode, only update the workbench counter
       return;
     }
 
     const payload = {
-      // The user's current query from the main chat input affects context
       current_query: $("#chat-input").val() || "",
       staged_items: window.stagedContextItems || [],
-      // RAG and LLM settings are read from the Flask session on the backend,
-      // so we don't need to send them all explicitly. The backend /api/context/preview
-      // endpoint is designed to use the current session's settings.
     };
 
     try {
@@ -58,20 +92,27 @@ function updateFullContextPreview() {
       );
 
       if (!response.ok) {
-        // Silently fail in the UI to not bother the user. Log to console.
         const errData = await response.json().catch(() => ({}));
         console.warn(
           "CTX_MAN_UI: Failed to fetch full context preview for token count:",
           errData.error || "API error",
         );
+        // On error, re-render staged items in their default state without truncation info
+        renderStagedContextItems(new Set());
         return;
       }
 
       const data = await response.json();
-      // The `updateContextUsageDisplay` function is in utils.js
       if (typeof updateContextUsageDisplay === "function") {
         updateContextUsageDisplay(data);
       }
+
+      // **THE FIX**: Get the set of included IDs and re-render the staged items list
+      // to visually indicate which items were included vs. dropped/truncated.
+      const includedItemIds = getIncludedItemIdsFromPreview(
+        data.prepared_messages,
+      );
+      renderStagedContextItems(includedItemIds);
     } catch (error) {
       console.warn(
         "CTX_MAN_UI: Network error fetching full context preview:",
@@ -99,14 +140,13 @@ function switchContextManagerMode() {
   } else {
     $("#ui-managed-context-ui").hide();
     $("#llmcore-managed-context-ui").show();
-    // Refresh the LLMCore managed view if it was hidden
     if ($("#workspace-subtab-btn").hasClass("active")) {
       fetchAndDisplayWorkspaceItems();
       renderStagedContextItems();
     } else if ($("#history-subtab-btn").hasClass("active")) {
       fetchAndDisplayHistoryContext();
     }
-    updateFullContextPreview(); // Trigger a context preview update when switching back
+    updateFullContextPreview();
   }
 }
 
@@ -116,8 +156,7 @@ function switchContextManagerMode() {
 
 /**
  * Estimates the token count for the content in the Prompt Workbench.
- * It sends the text to the backend's token estimation endpoint and updates the UI.
- * This function is debounced to prevent API calls on every keystroke.
+ * This is now also called when switching to UI Managed mode.
  */
 function updatePromptWorkbenchTokenEstimate() {
   clearTimeout(tokenEstimateDebounceTimer);
@@ -127,10 +166,10 @@ function updatePromptWorkbenchTokenEstimate() {
 
     if (!text) {
       $tokenDisplay.text("Tokens: 0");
+      updateContextUsageDisplay({ final_token_count: 0 }); // Update top bar too
       return;
     }
 
-    // Use globally managed provider/model names
     const providerName = window.currentLlmSettings?.providerName;
     const modelName = window.currentLlmSettings?.modelName;
 
@@ -146,28 +185,26 @@ function updatePromptWorkbenchTokenEstimate() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          text: text,
+          text,
           provider_name: providerName,
           model_name: modelName,
         }),
       });
 
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Failed to fetch token count");
-      }
+      if (!response.ok) throw new Error("API error");
 
       const data = await response.json();
-      $tokenDisplay.text(`Tokens: ~${data.token_count}`);
+      const tokenCount = data.token_count || 0;
+      $tokenDisplay.text(`Tokens: ~${tokenCount}`);
+      updateContextUsageDisplay({ final_token_count: tokenCount }); // Update top bar
     } catch (error) {
       console.error(
         "CTX_MAN_UI: Error estimating prompt workbench tokens:",
         error,
       );
       $tokenDisplay.text("Tokens: Error");
-      showToast("Token Count Error", error.message, "danger");
     }
-  }, 300); // 300ms debounce delay
+  }, 300);
 }
 
 // =================================================================================
@@ -181,7 +218,7 @@ function updatePromptWorkbenchTokenEstimate() {
 function fetchAndDisplayWorkspaceItems() {
   if (!window.currentLlmSessionId) {
     $("#workspace-items-list").html(
-      '<p class="text-muted p-2">No active session to load workspace items from.</p>',
+      '<p class="text-muted p-2">No active session.</p>',
     );
     return;
   }
@@ -203,7 +240,6 @@ function fetchAndDisplayWorkspaceItems() {
             ? item.content.substring(0, 100) +
               (item.content.length > 100 ? "..." : "")
             : "No content preview.";
-
           const $itemDiv = $("<div>", {
             class: "workspace-item",
             "data-item-id": item.id,
@@ -219,7 +255,6 @@ function fetchAndDisplayWorkspaceItems() {
           $itemDiv.append(
             `<div class="workspace-item-content-preview">${escapeHtml(contentPreview.replace(/\n/g, " "))}</div>`,
           );
-
           const $actions = $("<div>", { class: "workspace-item-actions mt-1" });
           $actions.append(
             $("<button>", {
@@ -234,7 +269,6 @@ function fetchAndDisplayWorkspaceItems() {
               title: "Stage for Active Context",
             }).html('<i class="fas fa-arrow-right fa-xs"></i> Stage'),
           );
-          // New button to add content to the prompt workbench
           $actions.append(
             $("<button>", {
               class:
@@ -257,12 +291,7 @@ function fetchAndDisplayWorkspaceItems() {
         );
       }
     },
-    error: function (jqXHR, textStatus, errorThrown) {
-      console.error(
-        "CTX_MAN_UI: Error fetching workspace items:",
-        textStatus,
-        errorThrown,
-      );
+    error: function () {
       $("#workspace-items-list").html(
         '<p class="text-danger small p-2">Error loading workspace items.</p>',
       );
@@ -271,10 +300,10 @@ function fetchAndDisplayWorkspaceItems() {
 }
 
 /**
- * Renders the staged context items in the UI.
- * Relies on global `stagedContextItems` from main_controller.js.
+ * **MODIFIED**: Renders the staged context items in the UI, now with visual indicators for inclusion status.
+ * @param {Set<string>} [includedItemIds=new Set()] A Set containing the IDs of items confirmed to be in the final context.
  */
-function renderStagedContextItems() {
+function renderStagedContextItems(includedItemIds = new Set()) {
   const $list = $("#active-context-spec-list").empty();
   if (window.stagedContextItems.length === 0) {
     $list.append(
@@ -282,36 +311,48 @@ function renderStagedContextItems() {
     );
     return;
   }
-  window.stagedContextItems.forEach(function (item, index) {
+
+  window.stagedContextItems.forEach(function (item) {
+    const idToCheck =
+      item.type === "message_history" || item.type === "workspace_item"
+        ? item.id_ref
+        : item.spec_item_id;
+    const isIncluded = includedItemIds.has(idToCheck);
+    const droppedClass =
+      window.stagedContextItems.length > 0 && !isIncluded
+        ? "staged-item-dropped"
+        : "";
+    const droppedIcon = !isIncluded
+      ? '<i class="fas fa-exclamation-triangle text-warning me-2" title="This item was not included in the final prompt, likely due to token limits."></i>'
+      : "";
+
     const $itemDiv = $("<div>", {
-      class: "staged-context-item",
+      class: `staged-context-item ${droppedClass}`,
       "data-staged-item-spec-id": item.spec_item_id,
     });
-    let itemTypeDisplay = item.type.replace(/_/g, " ");
-    itemTypeDisplay =
-      itemTypeDisplay.charAt(0).toUpperCase() + itemTypeDisplay.slice(1);
 
+    let itemTypeDisplay = item.type
+      .replace(/_/g, " ")
+      .replace(/(?:^|\s)\S/g, (a) => a.toUpperCase());
     $itemDiv.append(
-      `<div class="staged-item-header">ID: ${escapeHtml(item.spec_item_id)} (Type: ${escapeHtml(itemTypeDisplay)})</div>`,
+      `<div class="staged-item-header">${droppedIcon}${escapeHtml(itemTypeDisplay)}</div>`,
     );
 
     let sourceDisplay = "N/A";
     if (item.type === "workspace_item" || item.type === "message_history") {
-      sourceDisplay = item.id_ref || "Unknown Ref";
+      sourceDisplay = `Ref: ${item.id_ref || "Unknown"}`;
     } else if (item.type === "file_content" && item.path) {
-      sourceDisplay = item.path.split(/[\\/]/).pop();
+      sourceDisplay = `File: ${item.path.split(/[\\/]/).pop()}`;
     } else if (item.type === "text_content") {
       sourceDisplay = "Direct Text";
     }
     $itemDiv.append(
-      `<div class="small text-muted">Source: ${escapeHtml(sourceDisplay)}</div>`,
+      `<div class="small text-muted">${escapeHtml(sourceDisplay)}</div>`,
     );
 
     const contentPreview = item.content
       ? item.content.substring(0, 70) + (item.content.length > 70 ? "..." : "")
-      : item.path
-        ? item.path
-        : "No preview";
+      : item.path || "No preview";
     $itemDiv.append(
       `<div class="staged-item-content-preview">${escapeHtml(contentPreview.replace(/\n/g, " "))}</div>`,
     );
@@ -323,7 +364,7 @@ function renderStagedContextItems() {
           class: "btn btn-sm btn-outline-warning me-1 btn-edit-staged-item",
           title: "Edit Staged Item",
           "data-staged-item-spec-id": item.spec_item_id,
-        }).html('<i class="fas fa-edit fa-xs"></i> Edit'),
+        }).html('<i class="fas fa-edit fa-xs"></i>'),
       );
     }
     $actions.append(
@@ -331,21 +372,18 @@ function renderStagedContextItems() {
         class: "btn btn-sm btn-outline-danger btn-remove-staged-item",
         title: "Remove from Staged",
         "data-staged-item-spec-id": item.spec_item_id,
-      }).html('<i class="fas fa-times-circle fa-xs"></i> Remove'),
+      }).html('<i class="fas fa-times-circle fa-xs"></i>'),
     );
     $itemDiv.append($actions);
     $list.append($itemDiv);
   });
-  console.log("CTX_MAN_UI: Staged context items rendered.");
+  console.log(
+    "CTX_MAN_UI: Staged context items rendered with inclusion status.",
+  );
 }
 
 /**
  * Adds an item to the global `stagedContextItems` array and re-renders the list.
- * @param {string} type - Type of the item.
- * @param {string|null} id_ref - Original ID if referencing existing item.
- * @param {string|null} content - Content of the item.
- * @param {string|null} path - Path if it's a file.
- * @param {boolean} no_truncate - Whether to disable truncation.
  */
 function addStagedContextItem(
   type,
@@ -356,15 +394,14 @@ function addStagedContextItem(
 ) {
   const spec_item_id = `actx_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
   window.stagedContextItems.push({
-    spec_item_id: spec_item_id,
-    type: type,
-    id_ref: id_ref,
-    content: content,
-    path: path,
-    no_truncate: no_truncate,
+    spec_item_id,
+    type,
+    id_ref,
+    content,
+    path,
+    no_truncate,
   });
-  renderStagedContextItems();
-  updateFullContextPreview(); // Trigger update on change
+  updateFullContextPreview();
   console.log(
     "CTX_MAN_UI: Added to staged items:",
     window.stagedContextItems[window.stagedContextItems.length - 1],
@@ -372,19 +409,14 @@ function addStagedContextItem(
 }
 
 /**
- * Removes an item from the global `stagedContextItems` array by its spec_item_id and re-renders.
- * @param {string} spec_item_id_to_remove - The unique ID of the staged item to remove.
+ * Removes an item from the global `stagedContextItems` array and re-renders.
  */
 function removeStagedContextItem(spec_item_id_to_remove) {
   window.stagedContextItems = window.stagedContextItems.filter(
     (item) => item.spec_item_id !== spec_item_id_to_remove,
   );
-  renderStagedContextItems();
-  updateFullContextPreview(); // Trigger update on change
-  console.log(
-    `CTX_MAN_UI: Removed staged item ${spec_item_id_to_remove}. Remaining:`,
-    window.stagedContextItems,
-  );
+  updateFullContextPreview();
+  console.log(`CTX_MAN_UI: Removed staged item ${spec_item_id_to_remove}.`);
 }
 
 // =================================================================================
@@ -405,7 +437,6 @@ function renderHistoryContextList(messages, messageInclusionMap = {}) {
     return;
   }
   messages.forEach(function (msg) {
-    // Default to true (checked) if a message is not in the map
     const isChecked = messageInclusionMap[msg.id] !== false;
     const contentPreview = msg.content
       ? msg.content.substring(0, 150) + (msg.content.length > 150 ? "..." : "")
@@ -416,11 +447,10 @@ function renderHistoryContextList(messages, messageInclusionMap = {}) {
         : msg.role === "assistant"
           ? "text-info"
           : "text-secondary";
-
     const $itemDiv = $("<div>", {
       class: "form-check history-context-item",
       "data-message-id": msg.id,
-      "data-message-content": msg.content, // Store full content
+      "data-message-content": msg.content,
     });
     const $checkbox = $("<input>", {
       class: "form-check-input",
@@ -434,13 +464,11 @@ function renderHistoryContextList(messages, messageInclusionMap = {}) {
       for: `history-check-${msg.id}`,
       html: `<strong class="${roleClass}">${escapeHtml(msg.role.toUpperCase())}:</strong> ${escapeHtml(contentPreview)}`,
     });
-    // Button to add message content to workbench
     const $toWorkbenchBtn = $("<button>", {
       class: "btn btn-sm btn-outline-secondary ms-2 btn-add-to-workbench",
       title: "Add message content to Prompt Workbench",
       html: '<i class="fas fa-file-import fa-xs"></i>',
     });
-
     $itemDiv.append($checkbox, $label, $toWorkbenchBtn);
     $list.append($itemDiv);
   });
@@ -460,12 +488,10 @@ function fetchAndDisplayHistoryContext() {
   console.log(
     `CTX_MAN_UI: Fetching full session for history context: ${window.currentLlmSessionId}`,
   );
-  // Use the session_api.js helper function
   apiLoadSession(window.currentLlmSessionId)
     .done(function (response) {
       if (response && response.session_data) {
         const session = response.session_data;
-        // The inclusion map is stored in the client-specific metadata
         const clientData = session.metadata?.client_data || {};
         const messageInclusionMap = clientData.message_inclusion_map || {};
         renderHistoryContextList(session.messages, messageInclusionMap);
@@ -487,7 +513,7 @@ function fetchAndDisplayHistoryContext() {
 }
 
 // =================================================================================
-// SECTION: Context Preview
+// SECTION: Context Preview Modal
 // =================================================================================
 
 /**
@@ -500,7 +526,6 @@ function renderContextPreviewModal(data) {
     $display.html('<p class="text-danger">No preview data received.</p>');
     return;
   }
-
   $display.append(
     `<h5><i class="fas fa-file-alt"></i> Effective Context for LLM</h5>`,
   );
@@ -540,9 +565,7 @@ function renderContextPreviewModal(data) {
     });
     $display.append($msgList);
   } else {
-    $display.append(
-      '<p class="text-muted small">No messages prepared (check query and context items).</p>',
-    );
+    $display.append('<p class="text-muted small">No messages prepared.</p>');
   }
 
   if (data.rag_documents_used && data.rag_documents_used.length > 0) {
@@ -563,7 +586,7 @@ function renderContextPreviewModal(data) {
 
   if (data.rendered_rag_template_content) {
     $display.append(
-      `<h6><i class="fas fa-code"></i> Rendered RAG Prompt (if RAG active):</h6>`,
+      `<h6><i class="fas fa-code"></i> Rendered RAG Prompt:</h6>`,
     );
     $display.append(
       `<pre style="white-space: pre-wrap; word-break: break-all; font-size: 0.8em; max-height: 200px; overflow-y: auto; background-color: #333; padding: 5px; border-radius: 3px;">${escapeHtml(data.rendered_rag_template_content)}</pre>`,
@@ -577,25 +600,18 @@ function renderContextPreviewModal(data) {
 // =================================================================================
 
 /**
- * Initializes event listeners for the Context Manager tab. This now includes
- * the handler for the "Populate from Current LLMCore Context" button.
+ * Initializes event listeners for the Context Manager tab.
  */
 function initContextManagerEventListeners() {
-  // --- Mode Toggle ---
+  // Mode Toggle
   $("#context-mode-toggle").on("change", switchContextManagerMode);
 
-  // --- Prompt Workbench Listeners ---
+  // Prompt Workbench Listeners
   $("#prompt-workbench-textarea").on(
     "input",
     updatePromptWorkbenchTokenEstimate,
   );
 
-  /**
-   * Handles the click event for the 'Populate from Current LLMCore Context' button.
-   * It fetches the context that LLMCore would generate for the current chat state
-   * (including main chat input, RAG settings, etc.), formats it into a readable
-   * string, and populates the Prompt Workbench textarea with this content.
-   */
   $("#btn-populate-workbench-from-context").on("click", function () {
     if (!window.currentLlmSessionId) {
       showToast(
@@ -605,21 +621,11 @@ function initContextManagerEventListeners() {
       );
       return;
     }
-
-    // This mimics the payload for the regular preview button to get the most
-    // accurate context LLMCore would generate. It includes the query from the *main chat input*,
-    // as that's what a user would imminently send.
     const payload = {
       current_query: $("#chat-input").val().trim() || null,
       staged_items: window.stagedContextItems || [],
     };
-
-    console.log(
-      "CTX_MAN_UI: Populating workbench from LLMCore context with payload:",
-      payload,
-    );
     showToast("Info", "Fetching LLMCore context...", "info");
-
     $.ajax({
       url: `/api/sessions/${window.currentLlmSessionId}/context/preview`,
       type: "POST",
@@ -632,17 +638,12 @@ function initContextManagerEventListeners() {
           data.prepared_messages &&
           data.prepared_messages.length > 0
         ) {
-          // Format the prepared messages array into a single, readable string
           const formattedMessages = data.prepared_messages
-            .map((msg) => {
-              const role = msg.role.toUpperCase();
-              const content = msg.content;
-              return `--- ROLE: ${role} ---\n\n${content}`;
-            })
+            .map(
+              (msg) =>
+                `--- ROLE: ${msg.role.toUpperCase()} ---\n\n${msg.content}`,
+            )
             .join("\n\n\n");
-
-          // Set the formatted string as the value of the workbench and trigger the
-          // input event to update the token counter.
           $("#prompt-workbench-textarea")
             .val(formattedMessages)
             .trigger("input");
@@ -654,28 +655,24 @@ function initContextManagerEventListeners() {
         } else {
           showToast(
             "Warning",
-            "Could not populate workbench: No prepared messages returned from context preview.",
+            "Could not populate workbench: No prepared messages returned.",
             "warning",
           );
         }
       },
       error: function (jqXHR) {
-        const errorMsg =
-          jqXHR.responseJSON?.error ||
-          "Unknown error fetching context preview.";
         showToast(
           "Error",
-          `Failed to populate workbench: ${escapeHtml(errorMsg)}`,
+          `Failed to populate workbench: ${escapeHtml(jqXHR.responseJSON?.error || "Unknown error")}`,
           "danger",
         );
       },
     });
   });
 
-  // --- LLMCore Managed UI Event Listeners ---
-  $("#context-manager-tab-btn").on("shown.bs.tab", function (e) {
-    const isUIManaged = $("#context-mode-toggle").is(":checked");
-    if (!isUIManaged) {
+  // LLMCore Managed UI Event Listeners
+  $("#context-manager-tab-btn").on("shown.bs.tab", function () {
+    if (!$("#context-mode-toggle").is(":checked")) {
       if ($("#workspace-subtab-btn").hasClass("active")) {
         fetchAndDisplayWorkspaceItems();
         renderStagedContextItems();
@@ -688,7 +685,6 @@ function initContextManagerEventListeners() {
     }
   });
 
-  // Handle switching between the new sub-tabs
   $("#workspace-subtab-btn").on("shown.bs.tab", function () {
     fetchAndDisplayWorkspaceItems();
     renderStagedContextItems();
@@ -911,6 +907,7 @@ function initContextManagerEventListeners() {
     },
   );
 
+  // *** THIS IS THE LINE THAT WAS PREVIOUSLY A BUG ***
   $(
     "#btn-stage-from-workspace, #btn-stage-from-history, #btn-stage-new-file, #btn-stage-new-text",
   ).on("click", function () {
@@ -932,6 +929,7 @@ function initContextManagerEventListeners() {
         showToast("Staged", `Text snippet added to active context.`, "info");
       }
     } else {
+      // Placeholder for other staging actions like from history or workspace selection modal
       showToast(
         "Info",
         "This staging method is not fully implemented yet.",
