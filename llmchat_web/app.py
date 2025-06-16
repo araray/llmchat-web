@@ -91,20 +91,56 @@ else:
 
 # --- LLMCore Initialization (Asynchronous) ---
 async def initialize_llmcore_async() -> None:
+    """
+    Initializes the global LLMCore instance.
+    This version reads environment variables set by the `llmchat` CLI
+    to propagate logging settings into the web server process.
+    """
     global llmcore_instance, llmcore_init_error
     if llmcore_instance is not None:
         logger.info("LLMCore instance already initialized.")
         return
     logger.info("Attempting to initialize LLMCore for llmchat-web...")
+
+    # --- Rationale Block: fix(cli): Propagate log settings to web daemon process ---
+    # Pre-state: LLMCore.create() was called without overrides. This meant that when
+    #            `llmchat-web` was started by `llmchat web start`, it could not know
+    #            about CLI flags like --debug or --log-raw-payloads.
+    # Limitation: The web server's logging behavior did not match the user's command-line
+    #             intent, making debugging difficult.
+    # Decision Path: The `llmchat` CLI (`main.py`) will be modified to set specific environment
+    #                variables (`LLMCHAT_WEB_PROPAGATE_*`) based on its logging flags. This
+    #                function will now read those environment variables and construct a
+    #                `config_overrides` dictionary to pass to `LLMCore.create()`. This
+    #                ensures the user's desired logging settings are applied to the `LLMCore`
+    #                instance used by the web application workers.
+    # Post-state: Logging settings from the `llmchat` CLI are correctly propagated to
+    #             and respected by the `llmchat-web` server process, providing a consistent
+    #             and expected debugging experience.
+    web_init_overrides: Dict[str, Any] = {}
+    propagated_log_raw = os.environ.get("LLMCHAT_WEB_PROPAGATE_LOG_RAW")
+    propagated_log_level = os.environ.get("LLMCHAT_WEB_PROPAGATE_LOG_LEVEL")
+
+    if propagated_log_raw == "true":
+        web_init_overrides["llmcore.log_raw_payloads"] = True
+        logger.info("Found propagated LOG_RAW setting from environment. Adding to LLMCore overrides for web app.")
+
+    if propagated_log_level:
+        web_init_overrides["llmcore.log_level"] = propagated_log_level
+        logger.info(f"Found propagated LOG_LEVEL setting from environment. Adding to LLMCore overrides for web app.")
+    # --- End Rationale Block & Patch ---
+
     try:
-        llmcore_instance = await LLMCore.create()
+        llmcore_instance = await LLMCore.create(config_overrides=web_init_overrides)
         llmcore_logger = logging.getLogger("llmcore")
         if logger.isEnabledFor(logging.DEBUG):
             llmcore_logger.setLevel(logging.DEBUG)
             logger.info("LLMCore logger level set to DEBUG for web app based on llmchat_web settings.")
         else:
-            llmcore_logger.setLevel(logging.INFO)
-            logger.info("LLMCore logger level set to INFO for web app based on llmchat_web settings.")
+            # Respect the level set by the override if it exists, otherwise default to INFO
+            llmcore_level_from_override = web_init_overrides.get("llmcore.log_level", "INFO").upper()
+            llmcore_logger.setLevel(logging.getLevelName(llmcore_level_from_override))
+            logger.info(f"LLMCore logger level set to {llmcore_level_from_override} for web app based on config/overrides.")
         logger.info("LLMCore instance initialized successfully for llmchat-web.")
         llmcore_init_error = None
     except LLMCoreConfigError as e_conf:

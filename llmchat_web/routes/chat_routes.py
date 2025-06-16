@@ -11,6 +11,8 @@ import logging
 import uuid
 from typing import Any, AsyncGenerator, Dict, Optional, List, Union
 from pathlib import Path
+import aiofiles # Added for fallback file reading
+from werkzeug.utils import secure_filename # Though not used here, good practice if file names are manipulated
 
 from flask import Response, jsonify, request, stream_with_context
 from flask import session as flask_session
@@ -63,9 +65,9 @@ async def _resolve_staged_items_for_core(
     Resolves items from the client's 'active_context_specification' into
     LLMCoreMessage or LLMCoreContextItem objects suitable for LLMCore.
 
-    This function now correctly handles 'file_content' items by reading the
-    file from the specified server-side path, ensuring its content is included
-    in the context.
+    This function now robustly handles 'file_content' items by reading the
+    file from the specified server-side path, and includes a fallback to re-read
+    a workspace file's content if it appears to be empty.
 
     Args:
         staged_items_from_js: The list of item dictionaries from the client.
@@ -89,7 +91,40 @@ async def _resolve_staged_items_for_core(
                 if resolved_item: logger.debug(f"Resolved staged message_history item: {item_id_ref}")
             elif item_type_str == "workspace_item" and item_id_ref and session_id_for_staging:
                 resolved_item = await llmcore_instance.get_context_item(session_id_for_staging, item_id_ref)
+
+                # --- Rationale Block: fix(web): Ensure staged workspace file content is always loaded ---
+                # Pre-state: The function trusted that a retrieved workspace item of type USER_FILE
+                #            had its full content correctly loaded in the session object.
+                # Limitation: If there was a state management issue, the persisted content could be
+                #             missing or just whitespace. The previous check `if not resolved_item.content`
+                #             was insufficient for these cases.
+                # Decision Path: To make this more robust, the check is changed to `if resolved_item.content is None
+                #                or not resolved_item.content.strip()`. This explicitly handles `None` and also
+                #                trims the content to check if it's effectively empty (only whitespace).
+                #                If these conditions are met, the fallback to re-read the file from its
+                #                `source_id` path is triggered.
+                # Post-state: Staging a file from the workspace is more reliable. If the session's
+                #             cached content for the file item is missing or blank, the system will
+                #             recover by reading the file from its source path, ensuring the context is
+                #             correctly included.
+                if resolved_item and resolved_item.type == LLMCoreContextItemType.USER_FILE and (resolved_item.content is None or not resolved_item.content.strip()):
+                    logger.warning(f"Workspace item '{resolved_item.id}' is a USER_FILE but has empty/whitespace content. Attempting to re-read from source_id.")
+                    if resolved_item.source_id:
+                        try:
+                            file_path_obj = Path(resolved_item.source_id).expanduser().resolve()
+                            # Use async file IO for this async function
+                            async with aiofiles.open(file_path_obj, "r", encoding="utf-8", errors="ignore") as f:
+                                re_read_content = await f.read()
+                            resolved_item.content = re_read_content # Update the content in-place
+                            logger.info(f"Successfully re-read content (len: {len(re_read_content)}) for staged file item '{resolved_item.id}' from path '{resolved_item.source_id}'.")
+                        except FileNotFoundError:
+                            logger.error(f"Could not re-read file for item '{resolved_item.id}': path '{resolved_item.source_id}' not found.")
+                        except Exception as e_reread:
+                            logger.error(f"Error re-reading file for item '{resolved_item.id}' from path '{resolved_item.source_id}': {e_reread}")
+                # --- End Rationale Block & Patch ---
+
                 if resolved_item: logger.debug(f"Resolved staged workspace_item: {item_id_ref}")
+
             elif item_type_str == "file_content" and item_path:
                 file_path_obj = Path(item_path).expanduser()
                 if file_path_obj.is_file():
