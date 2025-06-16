@@ -205,48 +205,80 @@ function fetchAndUpdateInitialStatus() {
 }
 
 /**
- * Fetches and displays the list of saved sessions.
- * Now includes buttons for renaming and deleting each session.
- * Highlights the currentLlmSessionId if active.
+ * --- Rationale Block: fix(ui): Ensure new session card persists ---
+ * Pre-state: Clicking "New Session" prepended a temporary DOM element to the
+ * session list and used a `setTimeout` to refresh the list from the
+ * backend after 2 seconds.
+ * Limitation: This was a race condition. If the user didn't send a message
+ * within 2 seconds to persist the session, the refresh would fetch
+ * the session list from the backend (which didn't include the new
+ * transient session), causing the new session card to disappear from the UI.
+ * Decision Path: The logic is refactored to implement a robust "optimistic update".
+ * 1. The `fetchAndDisplaySessions` function is split into a data-fetching
+ * part (`fetchAndDisplaySessions`) and a pure rendering part (`renderSessionList`).
+ * 2. The "New Session" click handler is modified. Instead of adding a DOM element
+ * directly, it first creates the new transient session via the API.
+ * 3. Then, it fetches the current list of *persistent* sessions from the backend.
+ * 4. It creates a placeholder JavaScript object for the new transient session
+ * and prepends it to the array of persistent sessions.
+ * 5. Finally, it calls the new `renderSessionList` function with this combined
+ * array, which atomically updates the entire session list in the DOM.
+ * Post-state: The new session card appears immediately and remains visible, as its
+ * display is now managed by the client-side state until the next full
+ * refresh after the session is naturally persisted. This eliminates the
+ * race condition and the need for the `setTimeout` hack.
+ */
+
+/**
+ * Renders a list of session objects into the session list UI.
+ * @param {Array<Object>} sessions - An array of session metadata objects.
+ * @param {string|null} activeSessionId - The ID of the session to mark as active.
+ */
+function renderSessionList(sessions, activeSessionId) {
+  const $sessionList = $("#session-list").empty();
+  if (sessions && sessions.length > 0) {
+    sessions.forEach(function (session) {
+      const buttonsHtml = `
+            <div class="btn-group" role="group">
+                <button class="btn btn-sm btn-outline-secondary btn-rename-session-item" data-session-id="${escapeHtml(session.id)}" title="Rename Session">
+                    <i class="fas fa-pencil-alt fa-xs"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-danger btn-delete-session-item" data-session-id="${escapeHtml(session.id)}" title="Delete Session">
+                    <i class="fas fa-trash-alt fa-xs"></i>
+                </button>
+            </div>`;
+
+      const $sessionItem = $("<a>", {
+        href: "#",
+        class:
+          "list-group-item list-group-item-action d-flex justify-content-between align-items-center",
+        "data-session-id": session.id,
+        html: `<div>
+                       <div class="fw-bold session-name-display">${escapeHtml(session.name) || escapeHtml(session.id.substring(0, 15)) + "..."}</div>
+                       <small class="text-muted">Messages: ${session.message_count || 0}</small>
+                   </div>
+                   ${buttonsHtml}`,
+      });
+
+      if (session.id === activeSessionId) {
+        $sessionItem.addClass("active");
+      }
+      $sessionList.append($sessionItem);
+    });
+  } else {
+    $sessionList.append(
+      '<p class="text-muted small m-2">No saved sessions found.</p>',
+    );
+  }
+}
+
+/**
+ * Fetches the list of saved sessions from the backend and renders them.
  */
 function fetchAndDisplaySessions() {
   apiFetchSessions()
     .done(function (sessions) {
-      const $sessionList = $("#session-list").empty();
-      if (sessions && sessions.length > 0) {
-        sessions.forEach(function (session) {
-          const buttonsHtml = `
-                        <div class="btn-group" role="group">
-                            <button class="btn btn-sm btn-outline-secondary btn-rename-session-item" data-session-id="${escapeHtml(session.id)}" title="Rename Session">
-                                <i class="fas fa-pencil-alt fa-xs"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger btn-delete-session-item" data-session-id="${escapeHtml(session.id)}" title="Delete Session">
-                                <i class="fas fa-trash-alt fa-xs"></i>
-                            </button>
-                        </div>`;
-
-          const $sessionItem = $("<a>", {
-            href: "#",
-            class:
-              "list-group-item list-group-item-action d-flex justify-content-between align-items-center",
-            "data-session-id": session.id,
-            html: `<div>
-                                   <div class="fw-bold session-name-display">${escapeHtml(session.name) || escapeHtml(session.id.substring(0, 15)) + "..."}</div>
-                                   <small class="text-muted">Messages: ${session.message_count || 0}</small>
-                               </div>
-                               ${buttonsHtml}`,
-          });
-
-          if (session.id === window.currentLlmSessionId) {
-            $sessionItem.addClass("active");
-          }
-          $sessionList.append($sessionItem);
-        });
-      } else {
-        $sessionList.append(
-          '<p class="text-muted small m-2">No saved sessions found.</p>',
-        );
-      }
+      renderSessionList(sessions, window.currentLlmSessionId);
     })
     .fail(function () {
       $("#session-list").html(
@@ -316,7 +348,10 @@ $(document).ready(function () {
   $("#btn-new-session").on("click", function () {
     apiCreateNewSession()
       .done(function (newSessionResponse) {
+        // Update global state for the new session
         window.currentLlmSessionId = newSessionResponse.id;
+
+        // Clear UI components for the new session
         $("#chat-messages")
           .empty()
           .append(
@@ -324,6 +359,7 @@ $(document).ready(function () {
           );
         updateChatPanelState(true);
 
+        // Reset settings based on the response from the 'new' endpoint
         if (newSessionResponse.llm_settings) {
           window.currentLlmSettings.providerName =
             newSessionResponse.llm_settings.provider_name;
@@ -336,22 +372,24 @@ $(document).ready(function () {
         if (typeof renderStagedContextItems === "function")
           renderStagedContextItems();
 
-        // When a new session is created, reset the base context usage
         window.lastBaseContextUsage = null;
         updateContextUsageDisplay(null);
 
-        $("#session-list .list-group-item.active").removeClass("active");
-        const $newSessionItem = $("<a>", {
-          href: "#",
-          class: "list-group-item list-group-item-action active",
-          "data-session-id": newSessionResponse.id,
-          html: `<div class="d-flex w-100 justify-content-between">
-                       <h6 class="mb-1 text-primary"><em>New Session...</em></h6>
-                   </div>
-                   <small class="text-muted">Messages: 0</small>`,
+        // Perform optimistic UI update for the session list
+        apiFetchSessions().done(function (existingSessions) {
+          const newSessionPlaceholder = {
+            id: newSessionResponse.id,
+            name: "New Session...", // Use a placeholder name
+            message_count: 0,
+            updated_at: new Date().toISOString(),
+          };
+
+          // Prepend the new session placeholder to the fetched list
+          const combinedSessions = [newSessionPlaceholder, ...existingSessions];
+
+          // Render the updated list
+          renderSessionList(combinedSessions, newSessionResponse.id);
         });
-        $("#session-list").prepend($newSessionItem);
-        setTimeout(fetchAndDisplaySessions, 2000);
       })
       .fail(function () {
         showToast("Error", "Failed to create new session context.", "danger");
