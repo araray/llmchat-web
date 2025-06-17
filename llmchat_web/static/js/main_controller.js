@@ -8,6 +8,8 @@
  * This version includes logic for session renaming, fixes for session creation UI,
  * theme management, initialization of the prompt shortcut bar, and corrects the
  * logic for displaying chat history when a session is loaded.
+ * It now programmatically loads external libraries before initializing the app
+ * to provide a definitive fix for script loading race conditions.
  *
  * Global state variables (e.g., window.currentLlmSettings) are initialized in utils.js.
  * This script populates them based on backend status and user interactions.
@@ -28,6 +30,97 @@
 // window.currentRagSettings, window.currentLlmSettings, window.currentPromptTemplateValues)
 // are DECLARED and INITIALIZED in utils.js to ensure they exist before any other script runs.
 // This script (main_controller.js) will POPULATE these global variables.
+
+// =================================================================================
+// SECTION: Dynamic Script Loading (Robust Fix for Race Conditions)
+// =================================================================================
+
+/**
+ * Dynamically loads a script from a given URL and returns a Promise.
+ * @param {string} url The URL of the script to load.
+ * @returns {Promise<void>} A promise that resolves when the script is loaded, or rejects on error.
+ */
+function loadScript(url) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = url;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Failed to load script: ${url}`));
+    document.head.appendChild(script);
+  });
+}
+
+/**
+ * Loads all required external libraries in sequence before initializing the main application.
+ * This provides a definitive solution to the `ReferenceError` race condition.
+ */
+async function loadDependenciesAndInitializeApp() {
+  console.log("MAIN_CTRL: Starting dynamic library loading...");
+  const libraryUrls = [
+    "https://cdn.jsdelivr.net/npm/dompurify@3.1.5/dist/purify.min.js",
+    "https://cdn.jsdelivr.net/npm/marked@13.0.2/marked.min.js",
+    "https://cdn.jsdelivr.net/npm/marked-highlight@2.1.3/lib/index.umd.min.js",
+    "https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js",
+  ];
+
+  try {
+    for (const url of libraryUrls) {
+      console.log(`MAIN_CTRL: Loading ${url}...`);
+      await loadScript(url);
+      console.log(`MAIN_CTRL: Successfully loaded ${url}.`);
+    }
+
+    console.log(
+      "MAIN_CTRL: All external libraries loaded successfully. Initializing application.",
+    );
+
+    // This is the main application entry point, now guaranteed to run after dependencies are ready.
+    // Explicitly initialize the rendering pipeline first.
+    if (typeof initRenderingPipeline === "function") {
+      initRenderingPipeline();
+    } else {
+      console.error(
+        "FATAL: initRenderingPipeline function not found in chat_ui.js. Rendering will fail.",
+      );
+      showToast(
+        "Application Error",
+        "Could not initialize the content rendering engine. The application may not work correctly.",
+        "danger",
+        false,
+      );
+      return; // Halt initialization
+    }
+
+    initializeTheme();
+    fetchAndUpdateInitialStatus();
+
+    // Initialize event listeners from all UI modules
+    [
+      initChatEventListeners,
+      initRagEventListeners,
+      initLlmSettingsEventListeners,
+      initContextManagerEventListeners,
+      initPromptManagerEventListeners,
+      initPromptTemplateEventListeners,
+      initIngestionEventListeners,
+    ].forEach((initFunc) => {
+      if (typeof initFunc === "function") initFunc();
+    });
+
+    // After all modules are initialized, render the quick prompt bar from localStorage favorites
+    if (typeof renderQuickPromptBar === "function") {
+      renderQuickPromptBar();
+    }
+  } catch (error) {
+    console.error("FATAL: A critical library failed to load.", error);
+    showToast(
+      "Application Error",
+      `A critical library failed to load: ${error.message}. Please refresh the page.`,
+      "danger",
+      false,
+    );
+  }
+}
 
 // =================================================================================
 // SECTION: Theme Management
@@ -317,26 +410,12 @@ function fetchAndDisplayAppLogs() {
 // SECTION: Document Ready and Event Listeners
 // =================================================================================
 $(document).ready(function () {
-  initializeTheme();
-  fetchAndUpdateInitialStatus();
+  // Start the application by dynamically loading dependencies and then initializing.
+  loadDependenciesAndInitializeApp();
 
-  // Initialize event listeners from all UI modules
-  [
-    initChatEventListeners,
-    initRagEventListeners,
-    initLlmSettingsEventListeners,
-    initContextManagerEventListeners,
-    initPromptManagerEventListeners,
-    initPromptTemplateEventListeners,
-    initIngestionEventListeners,
-  ].forEach((initFunc) => {
-    if (typeof initFunc === "function") initFunc();
-  });
-
-  // After all modules are initialized, render the quick prompt bar from localStorage favorites
-  if (typeof renderQuickPromptBar === "function") {
-    renderQuickPromptBar();
-  }
+  // Event listeners that don't depend on the dynamically loaded libraries can be placed here,
+  // though it's often cleaner to keep all initialization logic together.
+  // We will bind them after successful library loading.
 
   // --- Theme Switcher Event Listener ---
   $(".dropdown-menu a[data-theme]").on("click", function (e) {

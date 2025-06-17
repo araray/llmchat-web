@@ -14,26 +14,34 @@
  * Also depends on marked.js, DOMPurify, and highlight.js, which must be loaded globally.
  */
 
-// --- START: Rich Content Rendering Pipeline Configuration ---
+// --- Rich Content Rendering Pipeline ---
+// Declare the renderer variable. It will be initialized by initRenderingPipeline().
+let markedRenderer;
 
-// 1. Create a new instance of Marked to avoid mutating the global scope.
-const markedRenderer = new marked.Marked();
+/**
+ * Initializes the Markdown rendering pipeline. This function must be called
+ * after the DOM and all external libraries (marked, DOMPurify, highlight.js) are loaded.
+ */
+function initRenderingPipeline() {
+  // 1. Create a new instance of Marked to avoid mutating the global scope.
+  markedRenderer = new marked.Marked();
 
-// 2. Use the marked-highlight extension for seamless integration.
-markedRenderer.use(
-  markedHighlight.markedHighlight({
-    langPrefix: "hljs language-", // Required for highlight.js CSS styles to apply correctly.
-    highlight(code, lang) {
-      // Check if the specified language is supported by highlight.js.
-      const language = hljs.getLanguage(lang) ? lang : "plaintext";
-      // Highlight the code, falling back to 'plaintext' if the language is unknown.
-      // This prevents errors and ensures the code block is still rendered cleanly.
-      return hljs.highlight(code, { language, ignoreIllegals: true }).value;
-    },
-  }),
-);
-
-// --- END: Rich Content Rendering Pipeline Configuration ---
+  // 2. Use the marked-highlight extension for seamless integration.
+  markedRenderer.use(
+    markedHighlight.markedHighlight({
+      langPrefix: "hljs language-", // Required for highlight.js CSS styles to apply correctly.
+      highlight(code, lang) {
+        // Check if the specified language is supported by highlight.js.
+        const language = hljs.getLanguage(lang) ? lang : "plaintext";
+        // Highlight the code, falling back to 'plaintext' if the language is unknown.
+        // This prevents errors and ensures the code block is still rendered cleanly.
+        return hljs.highlight(code, { language, ignoreIllegals: true }).value;
+      },
+    }),
+  );
+  console.log("CHAT_UI: Rich content rendering pipeline initialized.");
+}
+// --- END: Rich Content Rendering Pipeline ---
 
 /**
  * Appends a message to the chat UI, rendering its content as sanitized HTML from Markdown.
@@ -55,6 +63,22 @@ function appendMessageToChat(
   const messageId =
     elementIdOverride ||
     `msg-elem-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+
+  // Ensure the renderer is initialized before using it.
+  if (!markedRenderer) {
+    console.error(
+      "FATAL: markedRenderer is not initialized. Cannot render message.",
+    );
+    // Fallback to plain text to avoid a crash.
+    const $contentSpan = $("<span>").text(text);
+    $chatMessages.prepend(
+      $("<div>", {
+        id: messageId,
+        class: "message-bubble error-message-bubble",
+      }).text("Rendering engine failed."),
+    );
+    return messageId;
+  }
 
   // Parse the text as Markdown, sanitize the resulting HTML, and then set it.
   const sanitizedHtml = DOMPurify.sanitize(markedRenderer.parse(text));
