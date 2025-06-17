@@ -473,3 +473,89 @@ body {
 .staged-item-dropped .staged-item-header {
     font-style: italic;
 }
+
+/* --- START: Styles for Rendered Markdown Content --- */
+
+.message-bubble h1,
+.message-bubble h2,
+.message-bubble h3,
+.message-bubble h4,
+.message-bubble h5,
+.message-bubble h6 {
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.message-bubble p {
+    margin-bottom: 0.75rem;
+}
+
+.message-bubble ul,
+.message-bubble ol {
+    padding-left: 2rem;
+    margin-bottom: 1rem;
+}
+
+.message-bubble li {
+    margin-bottom: 0.25rem;
+}
+
+.message-bubble blockquote {
+    border-left: 4px solid var(--border-primary);
+    padding-left: 1rem;
+    margin: 0 0 1rem 0;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.message-bubble hr {
+    border-top: 1px solid var(--border-primary);
+    margin: 1.5rem 0;
+}
+
+.message-bubble table {
+    width: 100%;
+    margin-bottom: 1rem;
+    border-collapse: collapse;
+}
+
+.message-bubble th,
+.message-bubble td {
+    padding: 0.5rem;
+    border: 1px solid var(--border-primary);
+}
+
+.message-bubble th {
+    background-color: var(--bg-element);
+    font-weight: bold;
+}
+
+.message-bubble code:not(pre > code) {
+    background-color: var(--bg-element);
+    color: var(--accent-danger); /* Using accent color for inline code */
+    padding: 0.2em 0.4em;
+    margin: 0;
+    font-size: 85%;
+    border-radius: 3px;
+    font-family:
+        SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+        "Courier New", monospace;
+}
+
+.message-bubble pre {
+    background-color: #282c34; /* Default background for atom-one-dark theme */
+    padding: 1em;
+    border-radius: 5px;
+    overflow-x: auto;
+    margin-bottom: 1rem;
+}
+
+.message-bubble pre code.hljs {
+    padding: 0;
+    background: none;
+    color: #abb2bf; /* Default text color for atom-one-dark */
+}
+
+/* --- END: Styles for Rendered Markdown Content --- */
