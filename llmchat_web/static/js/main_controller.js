@@ -57,10 +57,11 @@ function loadScript(url) {
 async function loadDependenciesAndInitializeApp() {
   console.log("MAIN_CTRL: Starting dynamic library loading...");
   const libraryUrls = [
-    "https://cdn.jsdelivr.net/npm/dompurify@3.1.5/dist/purify.min.js",
-    "https://cdn.jsdelivr.net/npm/marked@13.0.2/marked.min.js",
-    "https://cdn.jsdelivr.net/npm/marked-highlight@2.1.3/lib/index.umd.min.js",
-    "https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js",
+    "https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js",
+    "https://cdn.jsdelivr.net/npm/marked@15.0.12/lib/marked.umd.min.js",
+    "https://cdn.jsdelivr.net/npm/marked-highlight@2.2.1/lib/index.umd.min.js",
+    // --- FIX: Use the correct browser-compatible distribution file for highlight.js ---
+    "https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.11.1/highlight.min.js",
   ];
 
   try {
