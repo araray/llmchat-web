@@ -8,12 +8,36 @@
  * This version includes fixes for preserving action buttons during streaming and
  * triggers real-time token estimation on input for both the chat input and the
  * full context preview.
+ * This version introduces rich content rendering for LLM responses using Markdown,
+ * sanitization, and syntax highlighting.
  * Depends on utils.js, rag_ui.js, session_api.js and accesses global state from main_controller.js.
+ * Also depends on marked.js, DOMPurify, and highlight.js, which must be loaded globally.
  */
 
+// --- START: Rich Content Rendering Pipeline Configuration ---
+
+// 1. Create a new instance of Marked to avoid mutating the global scope.
+const markedRenderer = new marked.Marked();
+
+// 2. Use the marked-highlight extension for seamless integration.
+markedRenderer.use(
+  markedHighlight.markedHighlight({
+    langPrefix: "hljs language-", // Required for highlight.js CSS styles to apply correctly.
+    highlight(code, lang) {
+      // Check if the specified language is supported by highlight.js.
+      const language = hljs.getLanguage(lang) ? lang : "plaintext";
+      // Highlight the code, falling back to 'plaintext' if the language is unknown.
+      // This prevents errors and ensures the code block is still rendered cleanly.
+      return hljs.highlight(code, { language, ignoreIllegals: true }).value;
+    },
+  }),
+);
+
+// --- END: Rich Content Rendering Pipeline Configuration ---
+
 /**
- * Appends a message to the chat UI.
- * @param {string} text - The message content.
+ * Appends a message to the chat UI, rendering its content as sanitized HTML from Markdown.
+ * @param {string} text - The message content, potentially in Markdown format.
  * @param {string} sender - 'user' or 'agent'.
  * @param {boolean} [isError=false] - If true, styles as an error message.
  * @param {string|null} [persistentMessageId=null] - The persistent ID of the message from the backend.
@@ -32,8 +56,10 @@ function appendMessageToChat(
     elementIdOverride ||
     `msg-elem-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
 
-  // Use a content span to separate text from actions
-  const $contentSpan = $("<span>").text(text);
+  // Parse the text as Markdown, sanitize the resulting HTML, and then set it.
+  const sanitizedHtml = DOMPurify.sanitize(markedRenderer.parse(text));
+  const $contentSpan = $("<span>").html(sanitizedHtml);
+
   const $messageDiv = $("<div>", {
     id: messageId,
     class: `message-bubble ${sender === "user" ? "user-message" : "agent-message"} ${isError ? "error-message-bubble" : ""}`,
@@ -54,11 +80,23 @@ function appendMessageToChat(
   }
 
   $chatMessages.prepend($messageDiv);
+
+  // Trigger highlighting for any new code blocks in this message.
+  // This is especially important for rendering historical messages correctly on session load.
+  const messageElement = document.getElementById(messageId);
+  if (messageElement) {
+    const codeBlocks = messageElement.querySelectorAll("pre code");
+    codeBlocks.forEach((block) => {
+      hljs.highlightElement(block);
+    });
+  }
+
   return messageId;
 }
 
 /**
- * Sends the chat message to the backend and handles streaming response.
+ * Sends the chat message to the backend and handles the streaming response,
+ * rendering Markdown content in real-time.
  * It now checks for the context management mode ('LLMCore' vs 'UI') and constructs
  * the payload accordingly. After completion, it fetches the user message's persistent ID.
  * Accesses global variables: currentLlmSessionId, stagedContextItems.
@@ -76,6 +114,7 @@ async function sendMessage() {
     return;
   }
 
+  // User messages are treated as plain text, but rendering them via the pipeline is safe.
   const userMessageElementId = appendMessageToChat(messageText, "user");
 
   $("#chat-input").val("");
@@ -142,9 +181,12 @@ async function sendMessage() {
       const errorData = await response
         .json()
         .catch(() => ({ error: "Unknown server error" }));
-      $agentContentSpan.html(
-        `<span class="text-danger">Error: ${escapeHtml(errorData.error || response.statusText)}</span>`,
+      const errorHtml = DOMPurify.sanitize(
+        markedRenderer.parse(
+          `**Error:** ${errorData.error || response.statusText}`,
+        ),
       );
+      $agentContentSpan.html(`<span class="text-danger">${errorHtml}</span>`);
       if (typeof updateContextUsageDisplay === "function")
         updateContextUsageDisplay(null);
       return;
@@ -171,7 +213,11 @@ async function sendMessage() {
             const eventData = JSON.parse(line.substring(6));
             if (eventData.type === "chunk") {
               accumulatedContent += eventData.content;
-              $agentContentSpan.text(accumulatedContent); // Use .text() to update only the content span
+              // Continuously parse and sanitize the streaming content
+              const streamingHtml = DOMPurify.sanitize(
+                markedRenderer.parse(accumulatedContent),
+              );
+              $agentContentSpan.html(streamingHtml);
             } else if (
               eventData.type === "full_response_id" &&
               eventData.message_id
@@ -193,6 +239,18 @@ async function sendMessage() {
                 displayRetrievedDocuments(eventData.documents || []);
               }
             } else if (eventData.type === "end") {
+              // After the stream ends, find all new code blocks in the message and highlight them.
+              const agentMessageElement = document.getElementById(
+                agentMessageElementId,
+              );
+              if (agentMessageElement) {
+                const codeBlocks =
+                  agentMessageElement.querySelectorAll("pre code");
+                codeBlocks.forEach((block) => {
+                  hljs.highlightElement(block);
+                });
+              }
+
               if (window.currentLlmSessionId) {
                 apiLoadSession(window.currentLlmSessionId).done(
                   function (response) {
@@ -215,10 +273,13 @@ async function sendMessage() {
                   },
                 );
               }
-              return;
+              return; // End processing for this message
             } else if (eventData.type === "error") {
+              const errorHtml = DOMPurify.sanitize(
+                markedRenderer.parse(`**Stream Error:** ${eventData.error}`),
+              );
               $agentContentSpan.html(
-                `<span class="text-danger">Stream Error: ${escapeHtml(eventData.error)}</span>`,
+                `<span class="text-danger">${errorHtml}</span>`,
               );
               return;
             }
@@ -229,9 +290,12 @@ async function sendMessage() {
       }
     }
   } catch (error) {
-    $agentContentSpan.html(
-      `<span class="text-danger">Error: ${escapeHtml(error.message || "Could not connect to chat service.")}</span>`,
+    const errorHtml = DOMPurify.sanitize(
+      markedRenderer.parse(
+        `**Error:** ${error.message || "Could not connect to chat service."}`,
+      ),
     );
+    $agentContentSpan.html(`<span class="text-danger">${errorHtml}</span>`);
     if (typeof updateContextUsageDisplay === "function")
       updateContextUsageDisplay(null);
   }
@@ -266,6 +330,8 @@ function initChatEventListeners() {
 
   // --- Per-Message Action Handlers ---
   $("#chat-messages").on("click", ".btn-copy-message", function () {
+    // Rationale: We get the raw text content by traversing the span, which avoids
+    // copying the HTML structure of lists, etc., providing a clean text copy.
     const messageContent = $(this)
       .closest(".message-bubble")
       .find("span")
