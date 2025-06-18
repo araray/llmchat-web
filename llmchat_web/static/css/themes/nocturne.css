@@ -1,0 +1,66 @@
+/*
+ * Theme Name: Nocturne
+ * Description: A sophisticated, comfortable, and modern dark theme for llmchat-web.
+ * Author: Araray Velho
+ */
+
+:root {
+    /* =================================
+     *      CORE BACKGROUNDS
+     * ================================= */
+    --bg-primary: #1c1e26; /* Softer, slightly blue-tinted black */
+    --bg-secondary: #232530; /* Main content area, slightly lighter */
+    --bg-tertiary: #2a2c38; /* Headers, footers, control bars */
+    --bg-quaternary: #232530; /* Sidebar, matching main content */
+    --bg-input: #2a2c38; /* Input fields, matching headers */
+    --bg-element: #313442; /* Workspace items, list items */
+    --bg-element-hover: #3d4050; /* Hover state for interactive elements */
+
+    /* =================================
+     *      CORE TYPOGRAPHY
+     * ================================= */
+    --text-primary: #d4d4d8; /* Main text, slightly off-white */
+    --text-secondary: #a0a0a8; /* Secondary text */
+    --text-muted: #6a6a72; /* Muted text for hints, timestamps */
+    --text-on-accent: #ffffff; /* Pure white text on colored buttons */
+    --text-placeholder: #6a6a72; /* Placeholder text in inputs */
+    --text-info: #67b4f5; /* A pleasant, readable blue for info */
+    --text-link: #67b4f5; /* Matching blue for hyperlinks */
+
+    /* =================================
+     *      BORDERS & DIVIDERS
+     * ================================= */
+    --border-primary: #3d4050; /* Main border color */
+    --border-secondary: #232530; /* Borders against the darkest background */
+
+    /* =================================
+     *      ACCENT & STATE COLORS
+     * ================================= */
+    --accent-primary: #5e81ac; /* Muted blue from Nord palette */
+    --accent-user-message-bg: #5e81ac; /* User chat bubble background */
+    --accent-agent-message-bg: #313442; /* Agent chat bubble background */
+    --accent-success: #8fbc8f; /* Muted green for success */
+    --accent-info: #88c0d0; /* Muted cyan for info */
+    --accent-warning: #d08770; /* Muted orange for warning */
+    --accent-danger: #bf616a; /* Muted red for danger */
+
+    /* =================================
+     *      COMPONENT-SPECIFIC
+     * ================================= */
+    --accent-badge-success-bg: var(--accent-success);
+    --accent-badge-warning-bg: var(--accent-warning);
+    --accent-badge-danger-bg: var(--accent-danger);
+    --accent-badge-info-bg: var(--bg-element);
+}
+
+/* Additional rule overrides for a polished dark theme experience */
+.left-sidebar.list-group-item.active {
+    color: #ffffff; /* Brighter text on the active item for better contrast */
+    font-weight: bold;
+}
+
+.message-bubble code:not(pre > code) {
+    color: var(
+        --accent-warning
+    ); /* Use the warning color for inline code to make it pop */
+}

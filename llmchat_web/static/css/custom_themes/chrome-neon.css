@@ -1,0 +1,132 @@
+/*
+ * Theme Name: Chrome Neon
+ * Description: A cyberpunk-inspired theme with gradients and glowing text.
+ * Author: Araray Velho
+ */
+
+:root {
+    /* =================================
+     *      CORE BACKGROUNDS
+     * ================================= */
+    --bg-primary: linear-gradient(
+        160deg,
+        #0b021d 0%,
+        #200d49 100%
+    ); /* Deep space gradient */
+    --bg-secondary: rgba(10, 10, 25, 0.6); /* Translucent dark panel */
+    --bg-tertiary: rgba(10, 10, 25, 0.8); /* More opaque header/footer */
+    --bg-quaternary: rgba(10, 10, 25, 0.7); /* Translucent sidebar */
+    --bg-input: rgba(0, 0, 0, 0.3); /* Dark, slightly transparent input */
+    --bg-element: rgba(40, 40, 70, 0.5); /* Translucent purple element bg */
+    --bg-element-hover: rgba(60, 60, 90, 0.7); /* Brighter hover state */
+
+    /* =================================
+     *      CORE TYPOGRAPHY
+     * ================================= */
+    --text-primary: #e5e5e5;
+    --text-secondary: #a0a0b0;
+    --text-muted: #606078;
+    --text-on-accent: #ffffff;
+    --text-placeholder: #606078;
+    --text-info: #00f0ff; /* Bright neon cyan */
+    --text-link: #ff00ff; /* Bright neon magenta */
+
+    /* =================================
+     *      BORDERS & DIVIDERS
+     * ================================= */
+    --border-primary: rgba(0, 240, 255, 0.3); /* Faint neon cyan border */
+    --border-secondary: rgba(0, 240, 255, 0.1);
+
+    /* =================================
+     *      ACCENT & STATE COLORS
+     * ================================= */
+    --accent-primary: #00f0ff; /* Neon cyan for primary actions */
+    --accent-user-message-bg: rgba(
+        0,
+        240,
+        255,
+        0.15
+    ); /* Translucent cyan bubble */
+    --accent-agent-message-bg: rgba(
+        255,
+        255,
+        255,
+        0.05
+    ); /* Very faint white bubble */
+    --accent-success: #00ff7f; /* Spring green */
+    --accent-info: #00f0ff;
+    --accent-warning: #ffd700; /* Gold/yellow */
+    --accent-danger: #ff0055; /* Neon pink/red */
+
+    /* =================================
+     *      COMPONENT-SPECIFIC
+     * ================================= */
+    --accent-badge-success-bg: var(--accent-success);
+    --accent-badge-warning-bg: var(--accent-warning);
+    --accent-badge-danger-bg: var(--accent-danger);
+    --accent-badge-info-bg: rgba(0, 240, 255, 0.2);
+}
+
+/* =========================================================
+ *  ADVANCED OVERRIDES FOR GRADIENTS, GLOWS, AND EFFECTS
+ * ========================================================= */
+
+/* Apply the gradient background to the body */
+body {
+    background: var(--bg-primary);
+    background-attachment: fixed; /* Prevents gradient from scrolling with content */
+}
+
+/* Add a subtle glow effect to key text elements */
+.top-bar.llmchat-brand,
+#status-provider,
+#status-model,
+.left-sidebar.list-group-item.active.session-name-display,
+.user-message,
+h5,
+h6 {
+    text-shadow:
+        0 0 3px var(--accent-primary),
+        0 0 5px rgba(0, 240, 255, 0.5);
+}
+
+/* Enhance borders and interactive elements */
+.left-sidebar.list-group-item.active {
+    background-color: rgba(0, 240, 255, 0.2);
+    border-color: var(--accent-primary);
+    color: #ffffff;
+}
+
+.user-message {
+    border: 1px solid rgba(0, 240, 255, 0.5);
+}
+
+.agent-message {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Style form inputs for the cyberpunk aesthetic */
+.form-control,
+.form-select {
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-primary);
+    color: var(--text-primary);
+}
+.form-control:focus,
+.form-select:focus {
+    background-color: var(--bg-input);
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 0.25rem rgba(0, 240, 255, 0.25);
+    color: var(--text-primary);
+}
+
+/* Style code blocks */
+.message-bubble pre {
+    background-color: rgba(0, 0, 0, 0.5);
+    border: 1px solid var(--border-primary);
+}
+
+.message-bubble code:not(pre > code) {
+    color: var(--accent-danger);
+    background-color: rgba(255, 0, 85, 0.1);
+}

@@ -1,0 +1,74 @@
+/*
+ * Theme Name: Photon
+ * Description: A clean, professional, and accessible light theme for llmchat-web.
+ * Author: Araray Velho
+ */
+
+:root {
+    /* =================================
+     *      CORE BACKGROUNDS
+     * ================================= */
+    --bg-primary: #f8f9fa; /* Page background */
+    --bg-secondary: #ffffff; /* Main content areas (chat, editor) */
+    --bg-tertiary: #e9ecef; /* Headers, footers, control bars */
+    --bg-quaternary: #f1f3f5; /* Sidebars and less prominent panels */
+    --bg-input: #ffffff; /* Input fields */
+    --bg-element: #f1f3f5; /* Workspace items, list items */
+    --bg-element-hover: #dee2e6; /* Hover state for interactive elements */
+
+    /* =================================
+     *      CORE TYPOGRAPHY
+     * ================================= */
+    --text-primary: #212529; /* Main text color, high contrast */
+    --text-secondary: #495057; /* Secondary text, slightly lighter */
+    --text-muted: #6c757d; /* Muted text for hints, timestamps */
+    --text-on-accent: #ffffff; /* Text on colored buttons/messages */
+    --text-placeholder: #6c757d; /* Placeholder text in inputs */
+    --text-info: #0c5460; /* Darker cyan for info text on light bg */
+    --text-link: #0d6efd; /* Standard blue for hyperlinks */
+
+    /* =================================
+     *      BORDERS & DIVIDERS
+     * ================================= */
+    --border-primary: #dee2e6; /* Main border color */
+    --border-secondary: #f8f9fa; /* Borders against the lightest background */
+
+    /* =================================
+     *      ACCENT & STATE COLORS
+     * ================================= */
+    --accent-primary: #0d6efd; /* Primary actions, active elements */
+    --accent-user-message-bg: #0d6efd; /* User chat bubble background */
+    --accent-agent-message-bg: #e9ecef; /* Agent chat bubble background */
+    --accent-success: #198754; /* Success states (green) */
+    --accent-info: #0dcaf0; /* Info states (cyan) */
+    --accent-warning: #ffc107; /* Warning states (yellow) */
+    --accent-danger: #dc3545; /* Danger/error states (red) */
+
+    /* =================================
+     *      COMPONENT-SPECIFIC
+     * ================================= */
+    --accent-badge-success-bg: #198754;
+    --accent-badge-warning-bg: #ffc107;
+    --accent-badge-danger-bg: #dc3545;
+    --accent-badge-info-bg: #adb5bd; /* Grey for info badges on light bg */
+}
+
+/* Additional rule overrides for a polished light theme experience */
+.bottom-control-bar.form-check-input {
+    background-color: var(--bg-tertiary);
+    border-color: #adb5bd;
+}
+
+.message-bubble.agent-message {
+    color: var(
+        --text-primary
+    ); /* Ensure agent text is dark on light grey bubble */
+}
+
+.message-bubble pre {
+    background-color: #f6f8fa; /* Light background for code blocks */
+}
+
+.message-bubble pre code.hljs {
+    color: #24292e; /* Dark text for code */
+}

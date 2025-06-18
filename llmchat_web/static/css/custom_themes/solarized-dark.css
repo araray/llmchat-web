@@ -1,0 +1,34 @@
+/* solarized-dark.css */
+:root {
+    --bg-primary: #002b36;
+    --bg-secondary: #073642;
+    --bg-tertiary: #002b36;
+    --bg-quaternary: #073642;
+    --bg-input: #00212b;
+    --bg-element: #073642;
+    --bg-element-hover: #586e75;
+
+    --text-primary: #839496;
+    --text-secondary: #93a1a1;
+    --text-muted: #586e75;
+    --text-on-accent: #ffffff;
+    --text-placeholder: #586e75;
+    --text-info: #2aa198;
+    --text-link: #268bd2;
+
+    --border-primary: #586e75;
+    --border-secondary: #073642;
+
+    --accent-primary: #268bd2;
+    --accent-user-message-bg: #268bd2;
+    --accent-agent-message-bg: #586e75;
+    --accent-success: #859900;
+    --accent-info: #2aa198;
+    --accent-warning: #b58900;
+    --accent-danger: #dc322f;
+
+    --accent-badge-success-bg: #859900;
+    --accent-badge-warning-bg: #b58900;
+    --accent-badge-danger-bg: #dc322f;
+    --accent-badge-info-bg: #586e75;
+}
