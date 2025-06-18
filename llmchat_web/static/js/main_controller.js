@@ -93,6 +93,7 @@ async function loadDependenciesAndInitializeApp() {
     }
 
     initializeTheme();
+    fetchAndPopulateThemes(); // Fetch and build the theme dropdown
     fetchAndUpdateInitialStatus();
 
     // Initialize event listeners from all UI modules
@@ -128,29 +129,87 @@ async function loadDependenciesAndInitializeApp() {
 // =================================================================================
 
 /**
- * Applies the selected theme by updating the override stylesheet and HTML attributes.
- * Also saves the preference to localStorage.
- * @param {string} themeName - The name of the theme to apply ('light', 'dark', or custom).
+ * Fetches available themes from the backend and populates the theme switcher dropdown.
+ * This function makes an asynchronous GET request to the /api/themes endpoint.
+ * On success, it clears any existing content from the #theme-switcher-list element
+ * and dynamically creates new list items for each theme returned by the API.
  */
-function applyTheme(themeName) {
-  console.log(`MAIN_CTRL: Applying theme: ${themeName}`);
+function fetchAndPopulateThemes() {
+  console.log("MAIN_CTRL: Fetching available themes...");
+  const $themeList = $("#theme-switcher-list");
+  $themeList.html(
+    '<li><a class="dropdown-item disabled" href="#">Loading...</a></li>',
+  );
+
+  $.ajax({
+    url: "/api/themes",
+    type: "GET",
+    dataType: "json",
+    success: function (data) {
+      $themeList.empty();
+      if (data && data.themes && data.themes.length > 0) {
+        data.themes.forEach(function (theme) {
+          const iconClass =
+            theme.id.includes("light") || theme.id.includes("photon")
+              ? "fa-sun"
+              : theme.id.includes("dark") || theme.id.includes("nocturne")
+                ? "fa-moon"
+                : "fa-palette";
+          const $item = $(`
+                        <li>
+                            <a class="dropdown-item" href="#" data-theme-id="${escapeHtml(theme.id)}" data-is-custom="${theme.is_custom}">
+                                <i class="fas ${iconClass} me-2"></i>${escapeHtml(theme.name)}
+                            </a>
+                        </li>
+                    `);
+          $themeList.append($item);
+        });
+      } else {
+        $themeList.html(
+          '<li><a class="dropdown-item disabled" href="#">No themes found.</a></li>',
+        );
+      }
+    },
+    error: function () {
+      $themeList.html(
+        '<li><a class="dropdown-item disabled text-danger" href="#">Error loading themes.</a></li>',
+      );
+      showToast("Error", "Could not fetch theme list from server.", "danger");
+    },
+  });
+}
+
+/**
+ * Applies the selected theme by updating the override stylesheet and HTML attributes.
+ * Also saves the preference to localStorage as a JSON object.
+ * @param {string} themeId - The ID of the theme to apply (e.g., 'light', 'chrome-neon').
+ * @param {boolean} isCustom - Whether the theme is from the custom_themes directory.
+ */
+function applyTheme(themeId, isCustom) {
+  console.log(`MAIN_CTRL: Applying theme: ${themeId} (Custom: ${isCustom})`);
   const themeOverrideSheet = $("#theme-override-stylesheet");
   const htmlElement = $("html");
 
-  if (themeName === "light" || themeName === "terminal_velocity") {
-    themeOverrideSheet.attr("href", `/static/css/themes/${themeName}.css`);
-    // Light theme uses light bootstrap components, dark/terminal use dark.
-    htmlElement.attr("data-bs-theme", themeName === "light" ? "light" : "dark");
-  } else {
-    // Default to dark theme
-    themeOverrideSheet.attr("href", "");
-    htmlElement.attr("data-bs-theme", "dark");
+  let themeUrl = "";
+  // The default 'dark' theme is built-in and requires no override file.
+  if (themeId !== "dark") {
+    const themeDir = isCustom ? "custom_themes" : "themes";
+    themeUrl = `/static/css/${themeDir}/${themeId}.css`;
   }
 
+  themeOverrideSheet.attr("href", themeUrl);
+
+  // Set Bootstrap's theme attribute for component styling.
+  // This logic determines if the theme is fundamentally light or dark.
+  const isLightTheme = themeId.includes("light") || themeId.includes("photon");
+  htmlElement.attr("data-bs-theme", isLightTheme ? "light" : "dark");
+
   try {
-    localStorage.setItem("llmchat_theme", themeName);
+    const themePreference = { id: themeId, is_custom: isCustom };
+    localStorage.setItem("llmchat_theme", JSON.stringify(themePreference));
     console.log(
-      `MAIN_CTRL: Theme preference '${themeName}' saved to localStorage.`,
+      `MAIN_CTRL: Theme preference saved to localStorage:`,
+      themePreference,
     );
   } catch (e) {
     console.warn(
@@ -162,22 +221,29 @@ function applyTheme(themeName) {
 
 /**
  * Initializes the theme based on the user's saved preference in localStorage,
- * or defaults to dark.
+ * or defaults to dark. It now parses a JSON object from localStorage.
  */
 function initializeTheme() {
-  let preferredTheme = "dark"; // Default theme
+  let preferredTheme = { id: "dark", is_custom: false }; // Default theme
   try {
-    const savedTheme = localStorage.getItem("llmchat_theme");
-    if (savedTheme) {
-      preferredTheme = savedTheme;
+    const savedThemeStr = localStorage.getItem("llmchat_theme");
+    if (savedThemeStr) {
+      const savedTheme = JSON.parse(savedThemeStr);
+      // Basic validation to ensure the saved object is usable
+      if (savedTheme && typeof savedTheme.id === "string") {
+        preferredTheme = savedTheme;
+      }
     }
   } catch (e) {
     console.warn(
-      "MAIN_CTRL: Could not read theme preference from localStorage.",
+      "MAIN_CTRL: Could not read or parse theme preference from localStorage.",
       e,
     );
+    // Fallback to default if parsing fails
+    localStorage.removeItem("llmchat_theme");
   }
-  applyTheme(preferredTheme);
+  console.log("MAIN_CTRL: Initializing with preferred theme:", preferredTheme);
+  applyTheme(preferredTheme.id, preferredTheme.is_custom);
 }
 
 // =================================================================================
@@ -414,14 +480,18 @@ $(document).ready(function () {
   // Start the application by dynamically loading dependencies and then initializing.
   loadDependenciesAndInitializeApp();
 
-  // Event listeners that don't depend on the dynamically loaded libraries can be placed here,
-  // though it's often cleaner to keep all initialization logic together.
-  // We will bind them after successful library loading.
-
-  // --- Theme Switcher Event Listener ---
-  $(".dropdown-menu a[data-theme]").on("click", function (e) {
+  // --- Theme Switcher Event Listener (using delegation) ---
+  // This listener is attached to the parent <ul> and will work for the
+  // dynamically added <a> elements.
+  $("#theme-switcher-list").on("click", "a.dropdown-item", function (e) {
     e.preventDefault();
-    applyTheme($(this).data("theme"));
+    const themeId = $(this).data("theme-id");
+    // data-is-custom is a boolean from the API, but becomes a string in the DOM
+    // so we compare to 'true'.
+    const isCustom = $(this).data("is-custom") === true;
+    if (themeId) {
+      applyTheme(themeId, isCustom);
+    }
   });
 
   // --- New Session Button ---
