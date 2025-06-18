@@ -7,7 +7,7 @@ and utility functions like token estimation.
 import logging
 import uuid
 from datetime import datetime
-from typing import Any, Dict, Optional # Added Optional
+from typing import Any, Dict, List, Optional
 from pathlib import Path
 import os
 
@@ -313,4 +313,83 @@ async def estimate_tokens_route() -> Any:
         return jsonify({"error": "An unexpected server error occurred during token estimation."}), 500
 
 
-logger.info("Core routes (index, /api/status, /api/command, /api/logs, /api/utils/estimate_tokens) defined on core_bp.")
+def _scan_for_themes(theme_dir: Path, is_custom: bool) -> List[Dict[str, Any]]:
+    """
+    Scans a directory for .css files to be used as themes.
+
+    This helper function iterates through a given directory, identifies CSS files,
+    and formats them into a structured list of dictionaries suitable for the API response.
+    It generates a user-friendly display name from the filename.
+
+    Args:
+        theme_dir: The pathlib.Path object for the directory to scan.
+        is_custom: A boolean flag indicating if the themes are custom.
+
+    Returns:
+        A sorted list of theme dictionaries.
+    """
+    themes = []
+    if not theme_dir.is_dir():
+        if is_custom:
+            logger.info(f"Custom themes directory not found at '{theme_dir}', which is acceptable. Skipping.")
+        else:
+            logger.warning(f"Built-in themes directory not found at '{theme_dir}'.")
+        return themes
+
+    try:
+        for f in theme_dir.iterdir():
+            if f.is_file() and f.suffix == '.css':
+                theme_id = f.stem
+                theme_name = theme_id.replace('_', ' ').replace('-', ' ').title()
+                themes.append({"id": theme_id, "name": theme_name, "is_custom": is_custom})
+    except OSError as e:
+        logger.error(f"Error scanning theme directory '{theme_dir}': {e}", exc_info=True)
+
+    return sorted(themes, key=lambda x: x['name'])
+
+
+@core_bp.route("/api/themes", methods=["GET"])
+def api_themes_route() -> Any:
+    """
+    API endpoint to discover and list available CSS themes.
+
+    This endpoint is responsible for finding all available built-in and custom themes
+    on the filesystem and providing them to the frontend. It ensures the default 'Dark'
+    theme is always available and de-duplicates any themes that might be found in
+    multiple locations to present a clean, sorted list to the UI.
+    """
+    try:
+        # Construct path to static/css relative to this file's location
+        static_folder = Path(__file__).resolve().parent.parent / 'static'
+        base_css_path = static_folder / 'css'
+
+        # The default 'Dark' theme is defined in custom.css and has no override file.
+        # It is always included as the base option.
+        default_themes = [
+            {"id": "dark", "name": "Dark", "is_custom": False},
+        ]
+
+        # Scan for built-in themes in the 'themes' directory
+        builtin_themes_dir = base_css_path / 'themes'
+        builtin_themes = _scan_for_themes(builtin_themes_dir, is_custom=False)
+
+        # Scan for custom themes in the 'custom_themes' directory
+        custom_themes_dir = base_css_path / 'custom_themes'
+        custom_themes = _scan_for_themes(custom_themes_dir, is_custom=True)
+
+        all_themes = default_themes + builtin_themes + custom_themes
+
+        # De-duplicate themes based on their ID to prevent issues if a theme file
+        # (e.g., 'dark.css') exists in one of the folders.
+        unique_themes_dict = {theme['id']: theme for theme in all_themes}
+
+        # Sort the final list of unique themes by their display name.
+        final_themes = sorted(list(unique_themes_dict.values()), key=lambda x: x['name'])
+
+        return jsonify({"themes": final_themes})
+    except Exception as e:
+        logger.error(f"Unexpected error in /api/themes endpoint: {e}", exc_info=True)
+        return jsonify({"error": "An unexpected server error occurred while discovering themes."}), 500
+
+
+logger.info("Core routes (index, /api/status, /api/command, /api/logs, /api/utils/estimate_tokens, /api/themes) defined on core_bp.")
