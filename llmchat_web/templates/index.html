@@ -10,7 +10,9 @@ block head_extra %}
 <nav class="top-bar d-flex justify-content-between align-items-center">
     <div>
         <span class="llmchat-brand"
-            >LLMChat Web
+            ><img
+                src="{{ url_for('static', filename='favicon.ico') }}"
+            />LLMChat Web
             <small id="app-version-display" class="text-muted"
                 >v{{ app_version }}</small
             >
