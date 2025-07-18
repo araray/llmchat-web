@@ -1,8 +1,7 @@
 # llmchat_web/routes/core_routes.py
 """
 Core Flask routes for the llmchat-web application.
-Handles serving the main page, API status, basic commands, log retrieval,
-and utility functions like token estimation.
+Handles serving the main page, API status, and utility functions.
 """
 import logging
 import uuid
@@ -12,35 +11,24 @@ from pathlib import Path
 import os
 
 from flask import jsonify, render_template, request
-from flask import session as flask_session # Alias to avoid confusion
+from flask import session as flask_session
 
-# Import the specific blueprint defined in the routes package's __init__.py
 from . import core_bp
-
-# Import shared components from the main app module (llmchat_web.app)
 from ..app import (
-    llmcore_instance,
-    llmcore_init_error, # The global init error from app.py
     async_to_sync_in_flask,
-    get_context_usage_info, # Import the helper function
     get_current_web_session_id,
     set_current_web_session_id,
-    logger as app_logger, # Main app logger, can be used as parent
+    logger as app_logger,
     APP_VERSION
 )
+from ..services import LLMCoreAPIClient
 
-# Added LLMCoreError and ProviderError for new endpoint
-from llmcore import LLMCoreError, ProviderError
-
-# Configure a local logger for this specific routes module
-# This logger will be a child of "llmchat_web.routes"
 logger = logging.getLogger("llmchat_web.routes.core")
-# Ensure it uses the parent's level if not specifically set otherwise
-if not logger.handlers and app_logger: # Check if handlers are already added
-    logger.parent = logging.getLogger("llmchat_web.routes") # Set parent to the routes package logger
+if not logger.handlers and app_logger:
+    logger.parent = logging.getLogger("llmchat_web.routes")
     if logger.parent and logger.parent.level:
         logger.setLevel(logger.parent.level)
-    else: # Fallback if parent logger isn't fully set up (should be by app.py)
+    else:
         logger.setLevel(app_logger.level if app_logger else logging.DEBUG)
 
 
@@ -49,70 +37,49 @@ def index() -> str:
     """
     Serves the main HTML page for the llmchat-web interface.
     Initializes Flask session variables if not already set.
-    These variables manage UI state like RAG settings, LLM provider/model, etc.
     """
-    logger.debug(f"Serving index.html. LLMCore status: {'OK' if llmcore_instance else 'Error'}")
+    logger.debug(f"Serving index.html. LLMCore API client will be used for backend communication.")
+
     if 'current_llm_session_id' not in flask_session:
         new_temp_id = f"web_initial_session_{uuid.uuid4().hex[:8]}"
         set_current_web_session_id(new_temp_id)
         logger.info(f"No LLMCore session ID in Flask session. Initialized with temporary ID: {new_temp_id}")
 
-    # Initialize RAG settings in session if not present
+    # Initialize session settings with defaults since we no longer have direct config access
     if 'rag_enabled' not in flask_session:
-        # Try to get default from llmcore_cfg if available, else False
-        default_rag_enabled = False
-        if llmcore_instance and llmcore_instance.config:
-            default_rag_enabled = llmcore_instance.config.get("context_management.rag_enabled_default", False)
-        flask_session['rag_enabled'] = default_rag_enabled
-        logger.debug(f"Flask session 'rag_enabled' initialized to: {flask_session['rag_enabled']}.")
+        flask_session['rag_enabled'] = False
+        logger.debug(f"Flask session 'rag_enabled' initialized to: {flask_session['rag_enabled']}")
 
     if 'rag_collection_name' not in flask_session:
-        default_rag_collection = None
-        if llmcore_instance and llmcore_instance.config:
-            default_rag_collection = llmcore_instance.config.get("storage.vector.default_collection")
-        flask_session['rag_collection_name'] = default_rag_collection
+        flask_session['rag_collection_name'] = None
         logger.debug(f"Flask session 'rag_collection_name' initialized to: {flask_session['rag_collection_name']}")
 
     if 'rag_k_value' not in flask_session:
-        default_rag_k = 3
-        if llmcore_instance and llmcore_instance.config:
-            default_rag_k = llmcore_instance.config.get("context_management.rag_retrieval_k", 3)
-        flask_session['rag_k_value'] = default_rag_k
+        flask_session['rag_k_value'] = 3
         logger.debug(f"Flask session 'rag_k_value' initialized to: {flask_session['rag_k_value']}")
 
-    if 'rag_filter' not in flask_session: # Stored as dict or None
+    if 'rag_filter' not in flask_session:
         flask_session['rag_filter'] = None
         logger.debug("Flask session 'rag_filter' initialized to None.")
 
-    # Initialize LLM settings in session if not present
-    default_provider_from_core = None
-    default_model_from_core = None
-    if llmcore_instance and llmcore_instance.config:
-        default_provider_from_core = llmcore_instance.config.get("llmcore.default_provider")
-        if default_provider_from_core:
-            provider_conf_key = f"providers.{default_provider_from_core}"
-            default_model_from_core = llmcore_instance.config.get(f"{provider_conf_key}.default_model")
-
+    # Initialize LLM settings - these will be populated via API calls
     if 'current_provider_name' not in flask_session:
-        flask_session['current_provider_name'] = default_provider_from_core
-        logger.debug(f"Flask session 'current_provider_name' initialized to LLMCore default: {flask_session.get('current_provider_name')}")
+        flask_session['current_provider_name'] = None
+        logger.debug(f"Flask session 'current_provider_name' initialized to None")
 
     if 'current_model_name' not in flask_session:
-        flask_session['current_model_name'] = default_model_from_core
-        logger.debug(f"Flask session 'current_model_name' initialized: {flask_session.get('current_model_name')}")
+        flask_session['current_model_name'] = None
+        logger.debug(f"Flask session 'current_model_name' initialized to None")
 
     if 'system_message' not in flask_session:
-        default_system_message = ""
-        if llmcore_instance and llmcore_instance.config:
-            default_system_message = llmcore_instance.config.get("llmcore.default_system_message", "")
-        flask_session['system_message'] = default_system_message
-        logger.debug(f"Flask session 'system_message' initialized to: '{str(default_system_message)[:50]}...'")
+        flask_session['system_message'] = ""
+        logger.debug(f"Flask session 'system_message' initialized to empty string")
 
     if 'prompt_template_values' not in flask_session:
         flask_session['prompt_template_values'] = {}
         logger.debug("Flask session 'prompt_template_values' initialized to empty dict.")
 
-    flask_session.modified = True # Ensure any changes made are saved
+    flask_session.modified = True
     return render_template("index.html", app_version=APP_VERSION)
 
 
@@ -120,40 +87,34 @@ def index() -> str:
 @async_to_sync_in_flask
 async def api_status() -> Any:
     """
-    API endpoint to check the status of the backend and LLMCore.
-    Returns current provider/model, session ID, RAG settings, system message,
-    prompt template values, context usage info, and application version.
+    API endpoint to check the status of the backend and LLMCore API.
+    Returns current provider/model, session ID, and application version.
     """
-    llmcore_status_val = "operational"
-    llmcore_error_detail_val = None
-    llmcore_default_provider_val = None
-    llmcore_default_model_val = None
+    # --- Rationale Block: API-based Status Checking ---
+    # Pre-state: The status endpoint directly checked llmcore_instance health
+    #            and accessed configuration through the library interface.
+    # Limitation: Direct coupling prevented deployment independence and required
+    #             the web service to initialize the full LLMCore library.
+    # Decision Path: Replace direct instance checks with HTTP health checks to
+    #                the LLMCore API server. Configuration details are no longer
+    #                directly accessible, so we focus on API connectivity status.
+    # Post-state: Status endpoint now verifies API connectivity and returns
+    #             web service state, enabling true service separation.
 
-    if llmcore_init_error:
+    api_client = LLMCoreAPIClient()
+
+    # Check LLMCore API health
+    try:
+        health_info = await api_client.get_health()
+        llmcore_status_val = "operational" if health_info.get("status") == "healthy" else "degraded"
+        llmcore_error_detail_val = health_info.get("error")
+    except Exception as e:
         llmcore_status_val = "error"
-        llmcore_error_detail_val = llmcore_init_error
-    elif llmcore_instance is None:
-        llmcore_status_val = "initializing"
-        llmcore_error_detail_val = "LLMCore instance is None (still initializing or failed silently)."
-    elif llmcore_instance and llmcore_instance.config:
-        llmcore_default_provider_val = llmcore_instance.config.get("llmcore.default_provider")
-        if llmcore_default_provider_val:
-            provider_conf_key = f"providers.{llmcore_default_provider_val}"
-            llmcore_default_model_val = llmcore_instance.config.get(f"{provider_conf_key}.default_model")
-    else:
-        llmcore_status_val = "error"
-        llmcore_error_detail_val = "LLMCore instance exists but its config is unavailable."
+        llmcore_error_detail_val = str(e)
+        logger.error(f"Failed to check LLMCore API health: {e}")
 
-    current_provider_val = flask_session.get('current_provider_name', llmcore_default_provider_val)
-    current_model_val = flask_session.get('current_model_name', llmcore_default_model_val)
-
-    if current_provider_val and current_model_val is None:
-        if llmcore_instance and llmcore_instance.config:
-            provider_specific_default_model = llmcore_instance.config.get(f"providers.{current_provider_val}.default_model")
-            if provider_specific_default_model:
-                current_model_val = provider_specific_default_model
-                logger.debug(f"API Status: Model was None for provider '{current_provider_val}', set to provider's default: '{current_model_val}'.")
-
+    current_provider_val = flask_session.get('current_provider_name')
+    current_model_val = flask_session.get('current_model_name')
     current_session_id_val = get_current_web_session_id()
     rag_enabled_val = flask_session.get('rag_enabled', False)
     rag_collection_name_val = flask_session.get('rag_collection_name')
@@ -161,9 +122,6 @@ async def api_status() -> Any:
     rag_filter_val = flask_session.get('rag_filter')
     system_message_val = flask_session.get('system_message', "")
     prompt_template_values_val = flask_session.get('prompt_template_values', {})
-
-    # Fetch context usage info for the current session
-    context_usage_val = await get_context_usage_info(current_session_id_val)
 
     status_payload: Dict[str, Any] = {
         "service_status": "operational",
@@ -180,9 +138,10 @@ async def api_status() -> Any:
         "rag_filter": rag_filter_val,
         "system_message": system_message_val,
         "prompt_template_values": prompt_template_values_val,
-        "context_usage": context_usage_val, # Add the context usage to the payload
+        "context_usage": None,  # Will be implemented when context API endpoints are available
     }
-    logger.debug(f"API Status Check. LLMCore: {llmcore_status_val}. Session: {current_session_id_val}. ContextUsage: {context_usage_val}")
+
+    logger.debug(f"API Status Check. LLMCore: {llmcore_status_val}. Session: {current_session_id_val}")
     return jsonify(status_payload)
 
 
@@ -191,8 +150,7 @@ async def api_status() -> Any:
 async def api_command_route() -> Any:
     """
     Handles commands submitted from the UI's command tab.
-    This is a generic endpoint for potential future command-line like interactions.
-    Currently, it acknowledges the command and can be expanded to execute specific actions.
+    This is a placeholder implementation for future command-line like interactions.
     """
     data = request.json
     if not data or "command" not in data:
@@ -202,12 +160,13 @@ async def api_command_route() -> Any:
     command_text: str = data["command"]
     logger.info(f"Received command via API: '{command_text}'")
 
-    response_output = f"Command received: '{command_text}'. (Execution placeholder)"
+    response_output = f"Command received: '{command_text}'. (Execution placeholder - API client integration pending)"
     return jsonify({
         "command_received": command_text,
         "output": response_output,
         "status": "acknowledged_placeholder"
     })
+
 
 @core_bp.route("/api/logs", methods=["GET"])
 def api_logs_route() -> Any:
@@ -215,10 +174,9 @@ def api_logs_route() -> Any:
     API endpoint to fetch recent application logs.
     Attempts to read the `llmchat_web_daemon.stderr.log` file from the
     standard llmchat configuration directory.
-    The number of lines returned can be specified with the `lines` query parameter.
     """
     log_lines_to_fetch = request.args.get("lines", 200, type=int)
-    max_lines_cap = 2000 # Safety cap
+    max_lines_cap = 2000
     if log_lines_to_fetch <= 0:
         log_lines_to_fetch = 200
     elif log_lines_to_fetch > max_lines_cap:
@@ -226,22 +184,18 @@ def api_logs_route() -> Any:
         logger.info(f"Requested log lines ({request.args.get('lines')}) exceeded cap, using {max_lines_cap}.")
 
     log_file_name = "llmchat_web_daemon.stderr.log"
-    log_file_path_str = ""
 
     try:
         from appdirs import user_config_dir
         app_config_dir = Path(user_config_dir("llmchat", appauthor=False))
         log_file_path = app_config_dir / "logs" / log_file_name
-        log_file_path_str = str(log_file_path)
         logger.debug(f"Constructed log file path using appdirs: {log_file_path}")
     except ImportError:
         logger.warning("'appdirs' library not found. Falling back to manual path construction for logs.")
-        log_file_path_str = "~/.config/llmchat/logs/" + log_file_name
-        log_file_path = Path(os.path.expanduser(log_file_path_str))
+        log_file_path = Path(os.path.expanduser("~/.config/llmchat/logs/" + log_file_name))
     except Exception as e_appdirs:
         logger.error(f"Error using appdirs to determine log path: {e_appdirs}. Falling back.")
-        log_file_path_str = "~/.config/llmchat/logs/" + log_file_name
-        log_file_path = Path(os.path.expanduser(log_file_path_str))
+        log_file_path = Path(os.path.expanduser("~/.config/llmchat/logs/" + log_file_name))
 
     logger.info(f"Attempting to read last {log_lines_to_fetch} lines from log file: {log_file_path}")
 
@@ -267,66 +221,30 @@ def api_logs_route() -> Any:
 
 
 @core_bp.route("/api/utils/estimate_tokens", methods=["POST"])
-@async_to_sync_in_flask
-async def estimate_tokens_route() -> Any:
+def estimate_tokens_route() -> Any:
     """
-    API endpoint to estimate the token count for a given string using
-    a specified provider and model. This enables UI features like live
-    token counting for text areas.
-
-    Expects JSON payload: {
-        "text": "The string to tokenize.",
-        "provider_name": "The LLM provider to use for tokenization.",
-        "model_name": "Optional: The specific model for context."
-    }
+    API endpoint to estimate token count - currently stubbed.
+    Will be implemented when the corresponding LLMCore API endpoint is available.
     """
-    if not llmcore_instance:
-        logger.error("Attempted to estimate tokens, but LLM service is not available.")
-        return jsonify({"error": "LLM service not available."}), 503
-
     data = request.json
     if not data or "text" not in data or "provider_name" not in data:
-        logger.warning("Token estimation API called without 'text' or 'provider_name' fields.")
+        logger.warning("Token estimation API called without required fields.")
         return jsonify({"error": "Missing required fields: 'text' and 'provider_name'."}), 400
 
-    text_to_tokenize = data["text"]
-    provider_name = data["provider_name"]
-    model_name = data.get("model_name") # Optional
+    # Stub implementation - return approximate estimate based on character count
+    text_length = len(data["text"])
+    estimated_tokens = max(1, text_length // 4)  # Rough approximation
 
-    try:
-        token_count = await llmcore_instance.estimate_tokens(
-            text=text_to_tokenize,
-            provider_name=provider_name,
-            model_name=model_name
-        )
-        logger.debug(f"Estimated {token_count} tokens for text (len: {len(text_to_tokenize)}) "
-                     f"with provider '{provider_name}' (model: {model_name or 'default'}).")
-        return jsonify({"token_count": token_count})
-    except ProviderError as e:
-        logger.error(f"ProviderError during token estimation for provider '{provider_name}': {e}", exc_info=True)
-        return jsonify({"error": f"Provider error during token estimation: {str(e)}"}), 500
-    except LLMCoreError as e: # Catch other LLMCore errors
-        logger.error(f"LLMCoreError during token estimation for provider '{provider_name}': {e}", exc_info=True)
-        return jsonify({"error": f"LLMCore error during token estimation: {str(e)}"}), 500
-    except Exception as e_unexp:
-        logger.error(f"Unexpected error during token estimation: {e_unexp}", exc_info=True)
-        return jsonify({"error": "An unexpected server error occurred during token estimation."}), 500
+    logger.debug(f"Stubbed token estimation: {estimated_tokens} tokens for text length {text_length}")
+    return jsonify({
+        "token_count": estimated_tokens,
+        "note": "This is a rough estimate. Precise tokenization will be available when LLMCore API endpoint is implemented."
+    })
 
 
 def _scan_for_themes(theme_dir: Path, is_custom: bool) -> List[Dict[str, Any]]:
     """
     Scans a directory for .css files to be used as themes.
-
-    This helper function iterates through a given directory, identifies CSS files,
-    and formats them into a structured list of dictionaries suitable for the API response.
-    It generates a user-friendly display name from the filename.
-
-    Args:
-        theme_dir: The pathlib.Path object for the directory to scan.
-        is_custom: A boolean flag indicating if the themes are custom.
-
-    Returns:
-        A sorted list of theme dictionaries.
     """
     themes = []
     if not theme_dir.is_dir():
@@ -352,38 +270,23 @@ def _scan_for_themes(theme_dir: Path, is_custom: bool) -> List[Dict[str, Any]]:
 def api_themes_route() -> Any:
     """
     API endpoint to discover and list available CSS themes.
-
-    This endpoint is responsible for finding all available built-in and custom themes
-    on the filesystem and providing them to the frontend. It ensures the default 'Dark'
-    theme is always available and de-duplicates any themes that might be found in
-    multiple locations to present a clean, sorted list to the UI.
     """
     try:
-        # Construct path to static/css relative to this file's location
         static_folder = Path(__file__).resolve().parent.parent / 'static'
         base_css_path = static_folder / 'css'
 
-        # The default 'Dark' theme is defined in custom.css and has no override file.
-        # It is always included as the base option.
         default_themes = [
             {"id": "dark", "name": "Dark", "is_custom": False},
         ]
 
-        # Scan for built-in themes in the 'themes' directory
         builtin_themes_dir = base_css_path / 'themes'
         builtin_themes = _scan_for_themes(builtin_themes_dir, is_custom=False)
 
-        # Scan for custom themes in the 'custom_themes' directory
         custom_themes_dir = base_css_path / 'custom_themes'
         custom_themes = _scan_for_themes(custom_themes_dir, is_custom=True)
 
         all_themes = default_themes + builtin_themes + custom_themes
-
-        # De-duplicate themes based on their ID to prevent issues if a theme file
-        # (e.g., 'dark.css') exists in one of the folders.
         unique_themes_dict = {theme['id']: theme for theme in all_themes}
-
-        # Sort the final list of unique themes by their display name.
         final_themes = sorted(list(unique_themes_dict.values()), key=lambda x: x['name'])
 
         return jsonify({"themes": final_themes})
