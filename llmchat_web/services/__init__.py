@@ -1,11 +1,16 @@
 # llmchat_web/services/__init__.py
 """
-Services package for llmchat-web.
+Service modules for llmchat-web.
 
-Contains service layer components for external API communication
-and business logic abstraction.
+This package contains service classes and utilities for communicating
+with external APIs and services.
 """
 
-from .llmcore_api_client import LLMCoreAPIClient
+from .llmcore_api_client import LLMCoreAPIClient, get_api_client, close_api_client, cleanup_all_clients
 
-__all__ = ["LLMCoreAPIClient"]
+__all__ = [
+    "LLMCoreAPIClient",
+    "get_api_client",
+    "close_api_client",
+    "cleanup_all_clients"
+]
