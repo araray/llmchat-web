@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llmchat-web"
-version = "0.16.0" # Version for llmchat-web
+version = "0.17.0" # Version for llmchat-web
 description = "A Flask-based web interface for LLMCore, providing chat and RAG functionalities."
 readme = "README.md" # Assuming llmchat-web will have its own README
 requires-python = ">=3.11"
@@ -37,11 +37,21 @@ dependencies = [
     "appdirs>=1.4.4",
 ]
 
+# Optional dependencies for server functionality
+[project.optional-dependencies]
+server = [
+    "python-daemon>=3.1.2",     # For daemonizing the web server
+    "gunicorn>=23.0.0",         # For a production-ready WSGI server
+]
+
 [project.urls]
 Homepage = "https://github.com/araray/llmchat-web"
 Repository = "https://github.com/araray/llmchat-web"
 Documentation = "https://github.com/araray/llmchat-web"
 Issues = "https://github.com/araray/llmchat-web/issues"
+
+[project.scripts]
+llmchat-web = "llmchat_web.app:main_cli"
 
 # --- Setuptools specific configuration ---
 [tool.setuptools.packages.find]
