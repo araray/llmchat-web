@@ -24,6 +24,7 @@ ingest_bp = Blueprint('ingest_bp', __name__, url_prefix='/api/ingest')
 settings_bp = Blueprint('settings_bp', __name__, url_prefix='/api/settings')
 preset_bp = Blueprint('preset_bp', __name__, url_prefix='/api/presets')
 task_bp = Blueprint('task_bp', __name__, url_prefix='/api/tasks')
+agent_bp = Blueprint('agent_bp', __name__, url_prefix='/api/v2')  # NEW: Agent routes blueprint
 
 
 # --- Import route modules to register their routes with the blueprints ---
@@ -37,6 +38,7 @@ from . import ingest_routes
 from . import settings_routes
 from . import preset_routes
 from . import task_routes
+from . import agent_routes  # NEW: Import agent routes module
 
 logger.info("Route modules imported and routes should be registered on their respective blueprints.")
 
@@ -51,6 +53,7 @@ all_blueprints = [
     settings_bp,
     preset_bp,
     task_bp,
+    agent_bp,  # NEW: Add agent blueprint to the list
 ]
 
 logger.info(f"Defined and collected {len(all_blueprints)} blueprints for llmchat_web routes.")

@@ -12,7 +12,7 @@ import json
 import logging
 import os
 import weakref
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
 import httpx
 
@@ -71,6 +71,76 @@ class LLMCoreAPIClient:
         """Get API and service information."""
         client = await self._get_client()
         response = await client.get("/api/v1/info")
+        response.raise_for_status()
+        return response.json()
+
+    async def post_chat(self, payload: Dict[str, Any]) -> Union[Dict[str, Any], AsyncGenerator[str, None]]:
+        """
+        Send a chat request to the LLMCore API.
+
+        Args:
+            payload: Chat request payload matching ChatRequest model
+
+        Returns:
+            For streaming: AsyncGenerator yielding text chunks
+            For non-streaming: Dictionary with response data
+        """
+        is_streaming = payload.get('stream', False)
+        client = await self._get_client()
+
+        if is_streaming:
+            return self._stream_chat_response(client, payload)
+        else:
+            response = await client.post("/api/v1/chat", json=payload)
+            response.raise_for_status()
+            return response.json()
+
+    async def _stream_chat_response(self, client: httpx.AsyncClient, payload: Dict[str, Any]) -> AsyncGenerator[str, None]:
+        """
+        Handle streaming chat response from the API.
+
+        Args:
+            client: HTTP client instance
+            payload: Chat request payload
+
+        Yields:
+            Text chunks from the streaming response
+        """
+        async with client.stream("POST", "/api/v1/chat", json=payload) as response:
+            response.raise_for_status()
+            async for chunk in response.aiter_text():
+                if chunk:
+                    yield chunk
+
+    async def run_agent(
+        self,
+        goal: str,
+        session_id: Optional[str] = None,
+        provider_name: Optional[str] = None,
+        model_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Start a new agent task via the LLMCore API.
+
+        Args:
+            goal: High-level goal for the agent
+            session_id: Optional session ID for context
+            provider_name: Optional LLM provider override
+            model_name: Optional model override
+
+        Returns:
+            Dictionary containing task_id and status
+        """
+        payload = {"goal": goal}
+        if session_id:
+            payload["session_id"] = session_id
+        if provider_name:
+            payload["provider"] = provider_name
+        if model_name:
+            payload["model"] = model_name
+
+        client = await self._get_client()
+        response = await client.post("/api/v2/agents/run", json=payload)
         response.raise_for_status()
         return response.json()
 

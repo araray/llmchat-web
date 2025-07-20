@@ -559,3 +559,118 @@ body {
 }
 
 /* --- END: Styles for Rendered Markdown Content --- */
+
+/* Agent UI Styling - Add to custom.css */
+
+/* Agent Task List Styling */
+.agent-task-item {
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.375rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.agent-task-item:hover {
+    background-color: var(--bs-secondary-bg);
+    border-color: var(--bs-primary);
+}
+
+.agent-task-item.selected {
+    background-color: var(--bs-primary-bg-subtle);
+    border-color: var(--bs-primary);
+}
+
+.agent-task-header {
+    display: flex;
+    justify-content: between;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+
+.agent-task-goal {
+    font-weight: 500;
+    flex-grow: 1;
+    margin-bottom: 0.25rem;
+}
+
+.agent-task-meta {
+    font-size: 0.75rem;
+    opacity: 0.8;
+}
+
+/* Agent Stream Styling */
+.agent-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.agent-step {
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.375rem;
+    padding: 0.75rem;
+    background-color: var(--bs-body-bg);
+}
+
+.agent-step-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.agent-step-title {
+    flex-grow: 1;
+}
+
+.agent-step-time {
+    font-size: 0.75rem;
+}
+
+.agent-step-content {
+    font-family: var(--bs-font-monospace);
+    font-size: 0.9rem;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* Different step types */
+.agent-step-thought {
+    border-left: 4px solid #007bff;
+}
+
+.agent-step-action {
+    border-left: 4px solid #28a745;
+}
+
+.agent-step-observation {
+    border-left: 4px solid #ffc107;
+}
+
+.agent-step-complete {
+    border-left: 4px solid #28a745;
+    background-color: var(--bs-success-bg-subtle);
+}
+
+.agent-step-error {
+    border-left: 4px solid #dc3545;
+    background-color: var(--bs-danger-bg-subtle);
+}
+
+.agent-step-status {
+    border-left: 4px solid #6c757d;
+}
+
+/* Welcome pane styling */
+#agent-welcome-pane {
+    background: linear-gradient(
+        135deg,
+        var(--bs-body-bg) 0%,
+        var(--bs-secondary-bg) 100%
+    );
+    border: 2px dashed var(--bs-border-color);
+    border-radius: 0.5rem;
+}

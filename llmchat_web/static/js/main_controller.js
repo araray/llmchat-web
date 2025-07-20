@@ -24,6 +24,7 @@
  * - prompt_manager_ui.js (provides prompt management and shortcut logic)
  * - prompt_template_ui.js
  * - ingestion_ui.js
+ * - agent_ui.js (NEW: provides agent task management functionality)
  */
 
 // Note: Global state variables (window.currentLlmSessionId, window.stagedContextItems,
@@ -105,8 +106,15 @@ async function loadDependenciesAndInitializeApp() {
       initPromptManagerEventListeners,
       initPromptTemplateEventListeners,
       initIngestionEventListeners,
+      initAgentEventListeners, // NEW: Initialize agent UI module
     ].forEach((initFunc) => {
-      if (typeof initFunc === "function") initFunc();
+      if (typeof initFunc === "function") {
+        initFunc();
+      } else {
+        console.warn(
+          `MAIN_CTRL: Function ${initFunc?.name || "unknown"} is not available`,
+        );
+      }
     });
 
     // After all modules are initialized, render the quick prompt bar from localStorage favorites
