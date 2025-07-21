@@ -5,3 +5,5 @@ try:
 except PackageNotFoundError:
     from .get_version import _get_version_from_pyproject
     __version__ = _get_version_from_pyproject()
+
+app_version = __version__

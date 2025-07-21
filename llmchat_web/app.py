@@ -24,8 +24,7 @@ from typing import Any, AsyncGenerator, Dict, Generator, Optional, Tuple, List
 import click
 from flask import Flask, session as flask_session
 
-from .get_version import get_version
-from .routes import all_blueprints
+from . import app_version
 
 # --- Optional Imports for Server Functionality ---
 try:
@@ -44,7 +43,7 @@ except (FileNotFoundError, subprocess.CalledProcessError):
 
 
 # Application version
-APP_VERSION = get_version()
+APP_VERSION = app_version
 
 # Configure logging
 logging.basicConfig(
@@ -125,9 +124,18 @@ def set_current_web_session_id(session_id: Optional[str]) -> None:
 def create_app() -> Flask:
     """
     Create and configure the Flask application.
+
+    Returns:
+        Configured Flask application instance
     """
     app = Flask(__name__)
     app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-key-change-in-production')
+
+    # --- FIX: Local import to break circular dependency ---
+    # By importing the routes here, we ensure that the helper functions defined
+    # at the top level of this module are fully loaded and available before the
+    # route modules (which import those helpers) are processed.
+    from .routes import all_blueprints
 
     for blueprint in all_blueprints:
         app.register_blueprint(blueprint)
