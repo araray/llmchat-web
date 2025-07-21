@@ -16,7 +16,10 @@ from flask import jsonify, request
 from llmcore import (ContextPresetItem, LLMCoreError, StorageError)
 from llmcore.models import ContextItemType
 
-from ..app import async_to_sync_in_flask, llmcore_instance, logger as app_logger
+# Rationale: The direct import of 'llmcore_instance' is removed from the top
+# level to break a circular dependency with the main 'app.py' module.
+# It will be imported locally within each route function that needs it.
+from ..app import async_to_sync_in_flask, logger as app_logger
 from . import preset_bp
 
 # Configure a local logger for this specific routes module
@@ -39,6 +42,9 @@ async def list_presets_route() -> Any:
         JSON response with a list of preset metadata (name, description, etc.),
         or an error message.
     """
+    # FIX: Import locally to prevent circular dependency on startup.
+    from ..app import llmcore_instance
+
     if not llmcore_instance:
         logger.error(
             "Attempted to list presets, but LLM service is not available."
@@ -66,6 +72,9 @@ async def create_preset_route() -> Any:
     Returns:
         JSON response with the data of the created preset or an error message.
     """
+    # FIX: Import locally to prevent circular dependency on startup.
+    from ..app import llmcore_instance
+
     if not llmcore_instance:
         logger.error(
             "Attempted to create a preset, but LLM service is not available."
@@ -107,6 +116,9 @@ async def get_preset_route(preset_name: str) -> Any:
     Returns:
         JSON response with the full preset data or a 404 error if not found.
     """
+    # FIX: Import locally to prevent circular dependency on startup.
+    from ..app import llmcore_instance
+
     if not llmcore_instance:
         logger.error(
             f"Attempted to get preset '{preset_name}', but LLM service is not available."
@@ -142,6 +154,9 @@ async def update_preset_route(preset_name: str) -> Any:
     Returns:
         JSON response with the updated preset data or an error message.
     """
+    # FIX: Import locally to prevent circular dependency on startup.
+    from ..app import llmcore_instance
+
     if not llmcore_instance:
         logger.error(
             f"Attempted to update preset '{preset_name}', but LLM service is not available."
@@ -185,6 +200,9 @@ async def delete_preset_route(preset_name: str) -> Any:
     Returns:
         JSON response confirming deletion or an error message.
     """
+    # FIX: Import locally to prevent circular dependency on startup.
+    from ..app import llmcore_instance
+
     if not llmcore_instance:
         logger.error(
             f"Attempted to delete preset '{preset_name}', but LLM service is not available."
@@ -221,6 +239,9 @@ async def rename_preset_route(old_name: str) -> Any:
     Returns:
         JSON response confirming the rename or an error message.
     """
+    # FIX: Import locally to prevent circular dependency on startup.
+    from ..app import llmcore_instance
+
     if not llmcore_instance:
         logger.error(
             f"Attempted to rename preset '{old_name}', but LLM service is not available."
