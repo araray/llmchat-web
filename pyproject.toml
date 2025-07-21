@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llmchat-web"
-version = "0.15.3" # Version for llmchat-web
+version = "0.18.0" # Version for llmchat-web
 description = "A Flask-based web interface for LLMCore, providing chat and RAG functionalities."
 readme = "README.md" # Assuming llmchat-web will have its own README
 requires-python = ">=3.11"
@@ -30,33 +30,33 @@ classifiers = [
 
 # Core dependencies for llmchat-web
 dependencies = [
-    "llmcore >= 0.18.0",   # Core backend library
-    "Flask>=3.0.0",        # Updated Flask version to match llmchat's server dep, was 3.1.0, using 3.0.0 as a common base.
-    "pydantic>=2.0.0",     # For models.py, if used more extensively
-    "werkzeug>=3.0.0",     # Flask dependency, often good to specify
-    "apykatu>=0.10.0", # If llmchat-web's /ingest directly uses apykatu library features
-    "GitPython>=3.1.0" # If llmchat-web's /ingest directly uses GitPython
-    # REMOVED: "llmchat >= 0.19.0" - llmchat-web should not depend on the llmchat CLI package.
-    # python-daemon is NOT a direct dependency of llmchat-web itself;
-    # daemonization is handled by the llmchat CLI's 'web' command.
+    "Flask>=3.0.0",
+    "pydantic>=2.0.0",
+    "werkzeug>=3.0.0",
+    "httpx[http2]>=0.28.1",
+    "appdirs>=1.4.4",
+]
+
+# Optional dependencies for server functionality
+[project.optional-dependencies]
+server = [
+    "python-daemon>=3.1.2",     # For daemonizing the web server
+    "gunicorn>=23.0.0",         # For a production-ready WSGI server
 ]
 
 [project.urls]
-Homepage = "https://github.com/araray/llmchat-web" # Updated URL
-Repository = "https://github.com/araray/llmchat-web" # Updated URL
-Documentation = "https://github.com/araray/llmchat-web" # Updated URL
-Issues = "https://github.com/araray/llmchat-web/issues" # Updated URL
+Homepage = "https://github.com/araray/llmchat-web"
+Repository = "https://github.com/araray/llmchat-web"
+Documentation = "https://github.com/araray/llmchat-web"
+Issues = "https://github.com/araray/llmchat-web/issues"
 
-# [project.scripts]
-# REMOVED: llmchat = "llmchat.main:main_cli_entry"
-# If llmchat-web needs its own runnable script (e.g., 'llmchat-web-server'), define it here.
-# For now, assuming it's run via 'python -m llmchat_web.app' or by 'llmchat web'.
+[project.scripts]
+llmchat-web = "llmchat_web.app:main_cli"
 
 # --- Setuptools specific configuration ---
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["llmchat_web*"] # Corrected to find llmchat_web packages
-# exclude = ["llmchat_web.tests*"] # Example if tests are structured this way
+include = ["llmchat_web*"]
 
 # --- Ruff Linter & Formatter Configuration ---
 [tool.ruff]
@@ -83,23 +83,19 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
-disallow_untyped_defs = false # Start less strict for web projects
+disallow_untyped_defs = false
 check_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = "llmchat_web.*" # Corrected module path
-disallow_untyped_defs = true # Enforce types within llmchat_web code
+module = "llmchat_web.*"
+disallow_untyped_defs = true
 
-# [[tool.mypy.overrides]]
-# module = "llmchat_web.tests.*" # Corrected module path for tests
-# disallow_untyped_defs = false
-
-# --- Pytest Configuration (Example for llmchat-web) ---
+# --- Pytest Configuration ---
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = "-ra -q --cov=llmchat_web --cov-report=term-missing --cov-report=xml" # Corrected coverage target
 testpaths = [
-    "tests", # Assuming tests are in llmchat-web/tests
+    "tests",
 ]
 asyncio_mode = "auto"
 
@@ -107,8 +103,7 @@ asyncio_mode = "auto"
 [tool.coverage.run]
 source = ["llmchat_web"] # Corrected coverage source
 omit = [
-    "llmchat_web/app.py", # Example: if __main__ block in app.py is not unit tested
-    # "llmchat_web/routes.py", # Or specific complex routes if needed
+    "llmchat_web/app.py", # Main entry point with __main__ block
 ]
 
 [tool.coverage.report]

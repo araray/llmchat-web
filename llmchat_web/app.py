@@ -1,294 +1,382 @@
 # llmchat_web/app.py
 """
-Main Flask application file for llmchat-web.
+Flask application for the llmchat-web interface.
 
-This application initializes the Flask app, LLMCore, logging,
-and registers blueprints for routing. Core route logic is now in the 'routes'
-sub-package. LLMCore initialization is attempted at module load time
-to support Gunicorn workers, in addition to being called by external
-startup mechanisms or direct script execution.
-
-SECRET_KEY Fallback Strategy:
-To ensure session consistency across Gunicorn workers when FLASK_SECRET_KEY
-environment variable is not set, a fallback secret key is generated once
-when this module is first loaded (_generated_flask_secret_key_at_module_load).
-All workers forked from the same Gunicorn master process will share this
-fallback key, preventing session decryption issues. For production,
-explicitly setting the FLASK_SECRET_KEY environment variable is still
-the recommended best practice.
+This is the main Flask application that provides a web interface for
+interacting with LLMCore via its HTTP API. The application is now a
+self-contained service with its own command-line interface for starting,
+stopping, and managing the server process as a daemon.
 """
 
-# --- Start: Fix for direct script execution and relative imports ---
-# This block MUST be at the very top of the file, before any other imports.
-import os
-import sys
-from pathlib import Path # For more robust path manipulation
-
-if __name__ == "__main__" and (__package__ is None or __package__ == ''):
-    current_file_path = Path(__file__).resolve()
-    package_dir = current_file_path.parent
-    project_root = package_dir.parent
-    if str(project_root) not in sys.path:
-        sys.path.insert(0, str(project_root))
-    __package__ = package_dir.name
-# --- End: Fix for direct script execution ---
-
 import asyncio
-import json
 import logging
-import secrets
-import uuid
-import threading # Added for thread-local event loop management
-from functools import wraps
-from typing import Any, Callable, Coroutine, Optional, Dict, Union, AsyncGenerator
-from importlib.metadata import version, PackageNotFoundError
+import os
+import threading
+import platform
+import sys
+import signal
+import time
+import errno
+import subprocess
+from pathlib import Path
+from typing import Any, AsyncGenerator, Dict, Generator, Optional, Tuple, List
 
-from flask import Flask, jsonify, render_template, request, Response, stream_with_context
-from flask import session as flask_session # Alias for clarity
-from llmcore import LLMCore, LLMCoreError, ConfigError as LLMCoreConfigError
-from llmcore import ProviderError, ContextLengthError, SessionNotFoundError
-from llmcore.models import Message as LLMCoreMessage, ChatSession as LLMCoreChatSession, Role as LLMCoreRole
+import click
+from flask import Flask, session as flask_session
 
-# --- Application Version ---
+from . import app_version
+
+# --- Optional Imports for Server Functionality ---
 try:
-    APP_VERSION = version("llmchat-web")
-except PackageNotFoundError:
-    from .get_version import _get_version_from_pyproject
-    APP_VERSION = _get_version_from_pyproject()
-    logging.getLogger("llmchat_web_startup").info(
-        f"llmchat-web package not found, using fallback version: {APP_VERSION}."
-    )
+    import daemon
+    import daemon.pidfile
+    PYTHON_DAEMON_AVAILABLE = True
+except ImportError:
+    daemon = None
+    PYTHON_DAEMON_AVAILABLE = False
 
-# --- Global LLMCore Instance ---
-llmcore_instance: Optional[LLMCore] = None
-llmcore_init_error: Optional[str] = None
+try:
+    subprocess.run(["gunicorn", "--version"], capture_output=True, check=False)
+    GUNICORN_AVAILABLE = True
+except (FileNotFoundError, subprocess.CalledProcessError):
+    GUNICORN_AVAILABLE = False
 
-# --- Logging Setup ---
+
+# Application version
+APP_VERSION = app_version
+
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("llmchat_web")
-logger.setLevel(logging.DEBUG)
+logger = logging.getLogger("llmchat_web.app")
 
-# --- Flask App Initialization ---
-app = Flask(__name__)
+# Thread-local storage for event loops
+_thread_locals = threading.local()
 
-_generated_flask_secret_key_at_module_load = secrets.token_hex(32)
-logger.info(f"Flask SECRET_KEY fallback generated at module load. For production, set FLASK_SECRET_KEY env var.")
-
-app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", _generated_flask_secret_key_at_module_load)
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_ENV") == "production"
-if os.environ.get("FLASK_SECRET_KEY"):
-    logger.info("Using FLASK_SECRET_KEY environment variable for Flask session encryption.")
-else:
-    logger.warning("FLASK_SECRET_KEY environment variable not set. Using a randomly generated fallback key for Flask sessions. "
-                   "This key will be consistent for all workers of this Gunicorn master process instance, "
-                   "but will change on application restart if the env var remains unset. "
-                   "Set FLASK_SECRET_KEY in your environment for stable production sessions.")
-
-# --- LLMCore Initialization (Asynchronous) ---
-async def initialize_llmcore_async() -> None:
-    """
-    Initializes the global LLMCore instance.
-    This version reads environment variables set by the `llmchat` CLI
-    to propagate logging settings into the web server process.
-    """
-    global llmcore_instance, llmcore_init_error
-    if llmcore_instance is not None:
-        logger.info("LLMCore instance already initialized.")
-        return
-    logger.info("Attempting to initialize LLMCore for llmchat-web...")
-
-    # --- Rationale Block: fix(cli): Propagate log settings to web daemon process ---
-    # Pre-state: LLMCore.create() was called without overrides. This meant that when
-    #            `llmchat-web` was started by `llmchat web start`, it could not know
-    #            about CLI flags like --debug or --log-raw-payloads.
-    # Limitation: The web server's logging behavior did not match the user's command-line
-    #             intent, making debugging difficult.
-    # Decision Path: The `llmchat` CLI (`main.py`) will be modified to set specific environment
-    #                variables (`LLMCHAT_WEB_PROPAGATE_*`) based on its logging flags. This
-    #                function will now read those environment variables and construct a
-    #                `config_overrides` dictionary to pass to `LLMCore.create()`. This
-    #                ensures the user's desired logging settings are applied to the `LLMCore`
-    #                instance used by the web application workers.
-    # Post-state: Logging settings from the `llmchat` CLI are correctly propagated to
-    #             and respected by the `llmchat-web` server process, providing a consistent
-    #             and expected debugging experience.
-    web_init_overrides: Dict[str, Any] = {}
-    propagated_log_raw = os.environ.get("LLMCHAT_WEB_PROPAGATE_LOG_RAW")
-    propagated_log_level = os.environ.get("LLMCHAT_WEB_PROPAGATE_LOG_LEVEL")
-
-    if propagated_log_raw == "true":
-        web_init_overrides["llmcore.log_raw_payloads"] = True
-        logger.info("Found propagated LOG_RAW setting from environment. Adding to LLMCore overrides for web app.")
-
-    if propagated_log_level:
-        web_init_overrides["llmcore.log_level"] = propagated_log_level
-        logger.info(f"Found propagated LOG_LEVEL setting from environment. Adding to LLMCore overrides for web app.")
-    # --- End Rationale Block & Patch ---
-
-    try:
-        llmcore_instance = await LLMCore.create(config_overrides=web_init_overrides)
-        llmcore_logger = logging.getLogger("llmcore")
-        if logger.isEnabledFor(logging.DEBUG):
-            llmcore_logger.setLevel(logging.DEBUG)
-            logger.info("LLMCore logger level set to DEBUG for web app based on llmchat_web settings.")
-        else:
-            # Respect the level set by the override if it exists, otherwise default to INFO
-            llmcore_level_from_override = web_init_overrides.get("llmcore.log_level", "INFO").upper()
-            llmcore_logger.setLevel(logging.getLevelName(llmcore_level_from_override))
-            logger.info(f"LLMCore logger level set to {llmcore_level_from_override} for web app based on config/overrides.")
-        logger.info("LLMCore instance initialized successfully for llmchat-web.")
-        llmcore_init_error = None
-    except LLMCoreConfigError as e_conf:
-        error_msg = f"LLMCore Configuration Error: {e_conf}. LLMCore functionality will be unavailable."
-        logger.critical(error_msg, exc_info=True)
-        llmcore_init_error = error_msg; llmcore_instance = None
-    except LLMCoreError as e_core:
-        error_msg = f"LLMCore Initialization Error: {e_core}. LLMCore functionality will be unavailable."
-        logger.critical(error_msg, exc_info=True)
-        llmcore_init_error = error_msg; llmcore_instance = None
-    except Exception as e:
-        error_msg = f"Unexpected error during LLMCore initialization: {e}. LLMCore functionality will be unavailable."
-        logger.critical(error_msg, exc_info=True)
-        llmcore_init_error = error_msg; llmcore_instance = None
-
-# --- LLMCore Initialization (Attempt at module load for WSGI servers) ---
-if llmcore_instance is None and llmcore_init_error is None:
-    logger.info("Attempting LLMCore initialization at module load time (e.g., for Gunicorn/WSGI)...")
-    try:
-        asyncio.run(initialize_llmcore_async())
-        if llmcore_instance: logger.info("LLMCore successfully initialized at module load.")
-        elif llmcore_init_error: logger.error(f"LLMCore initialization at module load failed. Error: {llmcore_init_error}")
-        else: logger.error("LLMCore initialization at module load did not set instance or error."); llmcore_init_error = "Unknown error during module load initialization."
-    except RuntimeError as e_runtime_module_load:
-        if "cannot be called when another loop is running" in str(e_runtime_module_load):
-            logger.warning(f"Asyncio RuntimeError during LLMCore init at module load: {e_runtime_module_load}. Assuming outer mechanism handles init.")
-        else:
-            err_msg = f"Critical unhandled RuntimeError during LLMCore init at module load: {e_runtime_module_load}"
-            logger.critical(err_msg, exc_info=True);
-            if not llmcore_init_error: llmcore_init_error = err_msg
-            llmcore_instance = None
-    except Exception as e_module_load:
-        err_msg = f"Unexpected error during LLMCore init at module load: {e_module_load}"
-        logger.critical(err_msg, exc_info=True)
-        if not llmcore_init_error: llmcore_init_error = err_msg
-        llmcore_instance = None
-
-# --- Flask Session Debug Logging ---
-@app.before_request
-def log_session_info_before_request():
-    """Logs Flask session content at the beginning of each request for debugging."""
-    if logger.isEnabledFor(logging.DEBUG): # Only log if debug is enabled for llmchat_web
-        session_details_to_log = {
-            "session_id_flask": flask_session.sid if hasattr(flask_session, 'sid') else 'N/A (default client-side session)',
-            "current_llm_session_id_in_flask": flask_session.get('current_llm_session_id'),
-            "current_provider_name_in_flask": flask_session.get('current_provider_name'),
-            "current_model_name_in_flask": flask_session.get('current_model_name'),
-            "rag_enabled_in_flask": flask_session.get('rag_enabled'),
-            "rag_collection_name_in_flask": flask_session.get('rag_collection_name'),
-            # Add other relevant session keys if needed
-            "flask_session_full_content_keys": list(flask_session.keys())
-        }
-        logger.debug(f"FLASK_SESSION_STATE_SUMMARY (Before Request {request.path}): {session_details_to_log}")
-
-
-# --- Thread-Safe Asyncio Event Loop Management ---
-_thread_local = threading.local()
 
 def get_or_create_event_loop() -> asyncio.AbstractEventLoop:
     """
-    Gets or creates a new event loop for the current thread and sets it as the active loop.
-    This ensures that each Flask worker thread has its own persistent event loop,
-    avoiding "Event loop is closed" errors with stateful async libraries.
-    """
-    if not hasattr(_thread_local, 'loop') or _thread_local.loop.is_closed():
-        logger.debug("Creating new persistent event loop for this thread.")
-        _thread_local.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(_thread_local.loop)
-    return _thread_local.loop
+    Get or create an event loop for the current thread.
 
-# --- Async to Sync Wrappers for Flask Routes ---
-def async_to_sync_in_flask(f: Callable[..., Coroutine[Any, Any, Any]]) -> Callable[..., Any]:
+    This is needed because Flask runs in multiple threads and each thread
+    needs its own event loop for async operations.
     """
-    A decorator that allows running an async function from a synchronous Flask route.
-    It gets or creates a persistent event loop for the current thread and uses it to
-    run the async function.
+    try:
+        return asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop
+
+
+def async_to_sync_in_flask(async_func):
     """
-    @wraps(f)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
+    Decorator to run async functions in Flask route handlers.
+    """
+    def wrapper(*args, **kwargs):
         loop = get_or_create_event_loop()
-        return loop.run_until_complete(f(*args, **kwargs))
+        return loop.run_until_complete(async_func(*args, **kwargs))
     return wrapper
 
-def run_async_generator_synchronously(async_gen_func: Callable[..., AsyncGenerator[str, None]], *args: Any, **kwargs: Any) -> Any:
-    """
-    Runs an asynchronous generator function synchronously from a synchronous context.
-    This is necessary for streaming responses in Flask with `stream_with_context`.
-    It uses the same thread-local event loop management as `async_to_sync_in_flask`.
-    """
-    utility_logger = logging.getLogger("llmchat_web.utils.async_gen_sync_runner")
-    loop = get_or_create_event_loop()
-    utility_logger.debug(f"Using thread-local event loop for run_async_generator_synchronously of {async_gen_func.__name__}")
-    async_gen = async_gen_func(*args, **kwargs)
-    while True:
-        try:
-            # Run the next step of the generator on the thread's persistent loop
-            item = loop.run_until_complete(async_gen.__anext__())
-            yield item
-        except StopAsyncIteration:
-            utility_logger.debug(f"Async generator {async_gen_func.__name__} completed.")
-            break
-        except Exception as e_inner:
-            utility_logger.error(f"Error during iteration of async generator {async_gen_func.__name__}: {e_inner}", exc_info=True)
-            break
-    # The loop is intentionally not closed here, as it's managed per-thread.
 
-# --- Session Helper Functions ---
+def run_async_generator_synchronously(async_gen_func, *args, **kwargs) -> Generator[str, None, None]:
+    """
+    Convert an async generator to a sync generator for Flask streaming.
+    """
+    loop = get_or_create_event_loop()
+
+    async def _run_async_gen():
+        async for item in async_gen_func(*args, **kwargs):
+            yield item
+
+    async_gen = _run_async_gen()
+
+    try:
+        while True:
+            try:
+                item = loop.run_until_complete(async_gen.__anext__())
+                yield item
+            except StopAsyncIteration:
+                break
+    finally:
+        loop.run_until_complete(async_gen.aclose())
+
+
 def get_current_web_session_id() -> Optional[str]:
+    """
+    Get the current LLMCore session ID from Flask session.
+    """
     return flask_session.get('current_llm_session_id')
 
-def set_current_web_session_id(llmcore_session_id: Optional[str]):
-    flask_session['current_llm_session_id'] = llmcore_session_id
-    logger.debug(f"Flask session 'current_llm_session_id' set to: {llmcore_session_id}")
 
-async def get_context_usage_info(session_id: Optional[str]) -> Optional[Dict[str, Any]]:
-    if not llmcore_instance or not session_id: return None
+def set_current_web_session_id(session_id: Optional[str]) -> None:
+    """
+    Set the current LLMCore session ID in Flask session.
+    """
+    if session_id is None:
+        flask_session.pop('current_llm_session_id', None)
+    else:
+        flask_session['current_llm_session_id'] = session_id
+
+
+def create_app() -> Flask:
+    """
+    Create and configure the Flask application.
+
+    Returns:
+        Configured Flask application instance
+    """
+    app = Flask(__name__)
+    app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-key-change-in-production')
+
+    # --- FIX: Local import to break circular dependency ---
+    # By importing the routes here, we ensure that the helper functions defined
+    # at the top level of this module are fully loaded and available before the
+    # route modules (which import those helpers) are processed.
+    from .routes import all_blueprints
+
+    for blueprint in all_blueprints:
+        app.register_blueprint(blueprint)
+        logger.info(f"Registered blueprint: {blueprint.name}")
+
+    logger.info(f"llmchat-web v{APP_VERSION} Flask application created successfully")
+    return app
+
+
+# Create the Flask application instance
+app = create_app()
+
+# ==============================================================================
+# SECTION: Standalone Server Management CLI
+# Logic ported from llmchat.cli.web_commands
+# ==============================================================================
+
+def _get_pid_file_path(pid_file_arg: Optional[str]) -> Path:
+    """Determines the absolute path for the PID file."""
+    if pid_file_arg:
+        return Path(pid_file_arg).resolve()
+    # Use appdirs or a similar library for robust config path determination
     try:
-        context_details = await llmcore_instance.get_last_interaction_context_info(session_id)
-        if context_details:
-            tokens_used = context_details.final_token_count if context_details.final_token_count is not None else 0
-            max_tokens = context_details.max_tokens_for_model if context_details.max_tokens_for_model is not None else 0
-            return {"tokens_used": tokens_used, "max_tokens": max_tokens, "usage_percentage": (tokens_used / max_tokens * 100) if max_tokens > 0 else 0}
-    except Exception as e_ctx_info: logger.error(f"Error fetching context usage info for session {session_id}: {e_ctx_info}")
-    return None
+        from appdirs import user_config_dir
+        config_dir = Path(user_config_dir("llmchat-web", appauthor=False))
+    except ImportError:
+        config_dir = Path.home() / ".config" / "llmchat-web"
+    return config_dir / "llmchat_web.pid"
 
-# --- Register Blueprints ---
-from . import routes as routes_package
-for bp in routes_package.all_blueprints:
-    app.register_blueprint(bp)
-    logger.info(f"Registered blueprint '{bp.name}' with url_prefix '{bp.url_prefix}'.")
-logger.info(f"All blueprints from 'llmchat_web.routes' package registered.")
+def _check_pid_running(pid: int) -> bool:
+    """Checks if a process with the given PID is running."""
+    if pid <= 0: return False
+    try:
+        os.kill(pid, 0)
+    except OSError as err:
+        if err.errno == errno.ESRCH: return False
+        elif err.errno == errno.EPERM: return True
+        raise
+    return True
 
-# --- Main Execution ---
+def _get_server_status(pid_file_path: Path) -> Tuple[str, Optional[int]]:
+    """Checks server status based on PID file. Returns status message and PID if running."""
+    if not pid_file_path.exists():
+        return "Server not running (PID file not found).", None
+    try:
+        with open(pid_file_path, "r") as pf:
+            pid_str = pf.read().strip()
+            if not pid_str:
+                try: pid_file_path.unlink()
+                except OSError: pass
+                return "Server not running (stale PID file - empty).", None
+            pid = int(pid_str)
+    except (IOError, ValueError) as e:
+        logger.warning(f"Could not read/parse PID from {pid_file_path}: {e}. Assuming stale.")
+        try: pid_file_path.unlink()
+        except OSError: pass
+        return f"Server not running (stale PID file - read error: {e}).", None
+
+    if _check_pid_running(pid):
+        return f"Server is running with PID {pid}.", pid
+    else:
+        logger.info(f"Process with PID {pid} from {pid_file_path} not found. Cleaning up stale PID file.")
+        try: pid_file_path.unlink()
+        except OSError as e_unlink: logger.warning(f"Could not remove stale PID file {pid_file_path}: {e_unlink}")
+        return f"Server not running (stale PID file - process {pid} not found).", None
+
+def start_server_logic(host: str, port: int, flask_debug: bool, wsgi_server_choice: str, gunicorn_workers: int):
+    """
+    Core logic to start the chosen WSGI server.
+    This function is the actual target for daemonization or foreground execution.
+    It does NOT initialize LLMCore; it simply runs the Flask app.
+    """
+    logger.info("start_server_logic: Preparing to start WSGI server.")
+
+    use_gunicorn = False
+    if wsgi_server_choice == "gunicorn":
+        if GUNICORN_AVAILABLE:
+            if flask_debug:
+                logger.warning("Flask debug mode is enabled; Gunicorn will not be used despite being chosen.")
+                click.echo(click.style("Warning: Flask debug is ON. Using Flask development server instead of Gunicorn.", fg="yellow"))
+            else:
+                use_gunicorn = True
+        else:
+            logger.warning("Gunicorn chosen but not available. Falling back to Flask development server.")
+            click.echo(click.style("Warning: Gunicorn selected but not found. Falling back to Flask dev server.", fg="yellow"))
+
+    if use_gunicorn:
+        logger.info(f"Starting server with Gunicorn. Host: {host}, Port: {port}, Workers: {gunicorn_workers}")
+        try:
+            from appdirs import user_config_dir
+            log_dir = Path(user_config_dir("llmchat-web", appauthor=False)) / "logs"
+        except ImportError:
+            log_dir = Path.home() / ".config" / "llmchat-web" / "logs"
+
+        log_dir.mkdir(parents=True, exist_ok=True)
+        gunicorn_access_log = log_dir / "gunicorn_access.log"
+        gunicorn_error_log = log_dir / "gunicorn_error.log"
+
+        gunicorn_cmd: List[str] = [
+            "gunicorn", "--bind", f"{host}:{port}", "--workers", str(gunicorn_workers),
+            "--access-logfile", str(gunicorn_access_log), "--error-logfile", str(gunicorn_error_log),
+            "llmchat_web.app:app",
+        ]
+        logger.info(f"Executing Gunicorn command: {' '.join(gunicorn_cmd)}")
+        try:
+            os.execvp(gunicorn_cmd[0], gunicorn_cmd)
+        except Exception as e_exec:
+            logger.critical(f"Failed to execute Gunicorn: {e_exec}", exc_info=True)
+            raise RuntimeError(f"Failed to start Gunicorn: {e_exec}")
+    else:
+        logger.info(f"Starting Flask development server. Host: {host}, Port: {port}, Debug: {flask_debug}")
+        try:
+            # use_reloader=False is important for daemon mode and single-process stability
+            app.run(host=host, port=port, debug=flask_debug, use_reloader=False)
+        except Exception as e_flask_run:
+            logger.error(f"Failed to start Flask development server: {e_flask_run}", exc_info=True)
+            raise RuntimeError(f"Flask dev server failed to start: {e_flask_run}")
+
+@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@click.option(
+    "--pid-file", type=click.Path(dir_okay=False, writable=True, resolve_path=True),
+    default=None, help="Path to PID file for daemon mode."
+)
+@click.version_option(APP_VERSION, prog_name="llmchat-web")
+@click.pass_context
+def main_cli(ctx, pid_file: Optional[str]):
+    """Manages the LLMChat web interface server."""
+    ctx.ensure_object(dict)
+    ctx.obj['pid_file_path'] = _get_pid_file_path(pid_file)
+
+@main_cli.command("start")
+@click.option("--host", default="127.0.0.1", show_default=True, help="Hostname to listen on.")
+@click.option("--port", default=5000, type=int, show_default=True, help="Port for the webserver.")
+@click.option("--flask-debug/--no-flask-debug", default=False, show_default=True, help="Enable Flask's debug mode (forces Flask dev server).")
+@click.option("--daemon/--foreground", "daemon_mode", default=True, show_default=True, help="Run server as a daemon (background) or in the foreground.")
+@click.option("--wsgi-server", type=click.Choice(["flask", "gunicorn", "auto"]), default="auto", show_default=True, help="WSGI server to use.")
+@click.option("--workers", default=4, type=int, show_default=True, help="Number of Gunicorn worker processes.")
+@click.pass_context
+def start_command(ctx, host: str, port: int, flask_debug: bool, daemon_mode: bool, wsgi_server: str, workers: int):
+    """Starts the llmchat-web server."""
+    pid_file_path = ctx.obj['pid_file_path']
+    status_msg, running_pid = _get_server_status(pid_file_path)
+    if running_pid is not None:
+        click.echo(click.style(f"Server already running (PID: {running_pid}). Use 'stop' or 'restart'.", fg="yellow"))
+        return
+
+    actual_wsgi_server = wsgi_server
+    if wsgi_server == "auto":
+        actual_wsgi_server = "gunicorn" if GUNICORN_AVAILABLE and not flask_debug else "flask"
+
+    server_name_display = "Gunicorn" if actual_wsgi_server == "gunicorn" else "Flask dev server"
+
+    if not daemon_mode:
+        logger.info(f"Starting web server in foreground mode with {server_name_display}.")
+        click.echo(f"Starting llmchat-web server in foreground ({server_name_display}) on http://{host}:{port}/")
+        try:
+            start_server_logic(host, port, flask_debug, actual_wsgi_server, workers)
+        except RuntimeError as e:
+            click.echo(click.style(f"Failed to start server: {e}", fg="red"), err=True); sys.exit(1)
+    else:
+        if platform.system() == "Windows" or not PYTHON_DAEMON_AVAILABLE:
+            click.echo(click.style("Daemon mode not available on this system. Starting in foreground.", fg="yellow"))
+            try: start_server_logic(host, port, flask_debug, actual_wsgi_server, workers)
+            except RuntimeError as e: click.echo(click.style(f"Failed to start server: {e}", fg="red"), err=True); sys.exit(1)
+            return
+
+        pid_file_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            from appdirs import user_config_dir
+            log_dir = Path(user_config_dir("llmchat-web", appauthor=False)) / "logs"
+        except ImportError:
+            log_dir = Path.home() / ".config" / "llmchat-web" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        daemon_context = daemon.DaemonContext(
+            working_directory=str(Path.cwd()), umask=0o022,
+            pidfile=daemon.pidfile.PIDLockFile(str(pid_file_path)),
+            stdout=open(log_dir / "daemon.stdout.log", 'a+'),
+            stderr=open(log_dir / "daemon.stderr.log", 'a+'),
+        )
+
+        click.echo(f"Starting llmchat-web server as a daemon ({server_name_display})...")
+        click.echo(f"  PID file: {pid_file_path}")
+        click.echo(f"  Logs: {log_dir}")
+        click.echo(f"  Server will listen on http://{host}:{port}/")
+
+        try:
+            with daemon_context:
+                logger.info("Daemon context entered. Starting server logic.")
+                start_server_logic(host, port, flask_debug, actual_wsgi_server, workers)
+        except Exception as e:
+            logger.critical(f"Failed to daemonize/run server: {e}", exc_info=True)
+            click.echo(click.style(f"Error starting daemon: {e}", fg="red"), err=True); sys.exit(1)
+
+@main_cli.command("stop")
+@click.pass_context
+def stop_command(ctx):
+    """Stops the daemonized llmchat-web server."""
+    pid_file_path = ctx.obj['pid_file_path']
+    status_msg, pid = _get_server_status(pid_file_path)
+
+    if pid is None:
+        click.echo(click.style(f"Server not running: {status_msg}", fg="yellow"))
+        return
+
+    click.echo(f"Attempting to stop server with PID {pid}...")
+    try:
+        os.kill(pid, signal.SIGTERM)
+        for _ in range(10): # Wait up to 5 seconds
+            time.sleep(0.5)
+            if not _check_pid_running(pid):
+                click.echo(click.style(f"Server with PID {pid} stopped.", fg="green"))
+                if pid_file_path.exists(): pid_file_path.unlink()
+                return
+        click.echo(click.style(f"Server PID {pid} did not stop. Try 'kill -9 {pid}'.", fg="red"))
+    except Exception as e:
+        click.echo(click.style(f"Error stopping server: {e}", fg="red"))
+
+@main_cli.command("restart")
+@click.pass_context
+def restart_command(ctx):
+    """Restarts the daemonized llmchat-web server."""
+    stop_command.callback(ctx)
+    time.sleep(1) # Give it a moment
+    # We need to get the start options again. For now, this is a simple restart.
+    # A more advanced version would store the last start options.
+    click.echo("Attempting to start the server again with default options...")
+    ctx.invoke(start_command)
+
+@main_cli.command("status")
+@click.pass_context
+def status_command(ctx):
+    """Checks and reports the status of the daemonized server."""
+    pid_file_path = ctx.obj['pid_file_path']
+    status_msg, pid = _get_server_status(pid_file_path)
+    if pid is not None:
+        click.echo(click.style(status_msg, fg="green"))
+    else:
+        click.echo(click.style(status_msg, fg="yellow"))
+
+
 if __name__ == "__main__":
-    port = int(os.environ.get("FLASK_RUN_PORT", 5000))
-    is_debug_mode = os.environ.get("FLASK_ENV", "production").lower() == "development"
-    if llmcore_instance is None and llmcore_init_error is None:
-        logger.info("Running LLMCore asynchronous initialization for direct app run...")
-        try: asyncio.run(initialize_llmcore_async())
-        except RuntimeError as e_runtime_direct:
-            if "cannot be called when another loop is running" in str(e_runtime_direct): logger.warning(f"Asyncio loop already running (direct run), LLMCore init via asyncio.run skipped: {e_runtime_direct}.")
-            else: logger.critical(f"Critical RuntimeError during LLMCore initialization (direct run): {e_runtime_direct}", exc_info=True);
-            if not llmcore_init_error: llmcore_init_error = f"RuntimeError (direct run): {e_runtime_direct}"; llmcore_instance = None
-        except Exception as e_startup_run_direct:
-            logger.critical(f"Critical error during asyncio.run(initialize_llmcore_async) (direct run): {e_startup_run_direct}", exc_info=True)
-            if not llmcore_init_error: llmcore_init_error = f"Failed during asyncio.run (direct run): {e_startup_run_direct}"; llmcore_instance = None
-    logger.info(f"Starting llmchat-web Flask server directly on port {port} (Debug: {is_debug_mode})...")
-    if llmcore_init_error and not llmcore_instance : logger.error(f"LLMCore failed to initialize: {llmcore_init_error}. Application might not function correctly.")
-    elif not llmcore_instance: logger.warning("LLMCore instance not available at server start (direct run). Functionality will be limited.")
-    else: logger.info("LLMCore instance is available for direct run.")
-    app.run(host="0.0.0.0", port=port, debug=is_debug_mode)
+    # This entry point is now for the CLI, not just the dev server.
+    main_cli()

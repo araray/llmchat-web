@@ -13,9 +13,10 @@ from flask import session as flask_session
 # Import the specific blueprint defined in the routes package's __init__.py
 from . import settings_bp
 
-# Import shared components from the main app module (llmchat_web.app)
+# Rationale: The direct import of 'llmcore_instance' is removed from the top
+# level to break a circular dependency with the main 'app.py' module.
+# It will be imported locally within each route function that needs it.
 from ..app import (
-    llmcore_instance,
     async_to_sync_in_flask,
     logger as app_logger
 )
@@ -33,6 +34,9 @@ if not logger.handlers and app_logger:
 @settings_bp.route("/llm/providers", methods=["GET"])
 @async_to_sync_in_flask
 async def get_llm_providers_route() -> Any:
+    # FIX: Import locally to prevent circular dependency on startup.
+    from ..app import llmcore_instance
+
     if not llmcore_instance:
         logger.error("Attempted to list LLM providers, but LLM service is not available.")
         return jsonify({"error": "LLM service not available."}), 503
@@ -51,6 +55,9 @@ async def get_llm_providers_route() -> Any:
 @settings_bp.route("/llm/providers/<provider_name>/models", methods=["GET"])
 @async_to_sync_in_flask
 async def get_llm_models_route(provider_name: str) -> Any:
+    # FIX: Import locally to prevent circular dependency on startup.
+    from ..app import llmcore_instance
+
     if not llmcore_instance:
         logger.error(f"Attempted to list models for provider {provider_name}, but LLM service is not available.")
         return jsonify({"error": "LLM service not available."}), 503
@@ -68,6 +75,9 @@ async def get_llm_models_route(provider_name: str) -> Any:
 
 @settings_bp.route("/llm/update", methods=["POST"])
 def update_llm_settings_route() -> Any:
+    # FIX: Import locally to prevent circular dependency on startup.
+    from ..app import llmcore_instance
+
     data = request.json
     if not data:
         logger.warning("Update LLM settings called with no JSON data.")
