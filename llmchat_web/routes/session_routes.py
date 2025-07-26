@@ -1,7 +1,9 @@
 # llmchat_web/routes/session_routes.py
 """
 Flask routes for session management in the llmchat-web application.
-Currently stubbed - will be implemented when corresponding LLMCore API endpoints are available.
+
+This module provides API proxy endpoints that communicate with the llmcore service
+to manage session lifecycle (create, list, load, delete, rename).
 """
 import logging
 import uuid
@@ -17,6 +19,7 @@ from ..app import (
     set_current_web_session_id,
     logger as app_logger
 )
+from ..services import get_api_client
 
 logger = logging.getLogger("llmchat_web.routes.session")
 if not logger.handlers and app_logger:
@@ -28,26 +31,48 @@ if not logger.handlers and app_logger:
 
 
 @session_bp.route("", methods=["GET"])
-def list_sessions_route() -> Any:
+@async_to_sync_in_flask
+async def list_sessions_route() -> Any:
     """
-    Lists all available LLMCore sessions.
-    Currently stubbed - will be implemented when LLMCore API /sessions endpoint is available.
+    Lists all available LLMCore sessions by proxying to the llmcore API.
+
+    Returns:
+        JSON response with list of session metadata
     """
-    logger.info("Session listing requested - returning stubbed response")
-    return jsonify([])  # Return empty list for now
+    logger.info("Session listing requested - calling llmcore API")
+    try:
+        api_client = get_api_client()
+        sessions = await api_client.list_sessions()
+        logger.info(f"Retrieved {len(sessions)} sessions from llmcore API")
+        return jsonify(sessions)
+    except Exception as e:
+        logger.error(f"Error fetching sessions from llmcore API: {e}", exc_info=True)
+        return jsonify({"error": f"Failed to fetch sessions: {str(e)}"}), 500
 
 
 @session_bp.route("/new", methods=["POST"])
-def new_session_route() -> Any:
+@async_to_sync_in_flask
+async def new_session_route() -> Any:
     """
-    Initializes a new session context in the Flask web session.
-    This generates a new potential LLMCore session ID and resets session variables.
+    Creates a new session via the llmcore API and updates Flask session state.
+
+    Returns:
+        JSON response with new session data
     """
-    logger.info("New session context requested")
+    logger.info("New session creation requested")
     try:
-        new_llmcore_session_id = f"web_session_{uuid.uuid4().hex}"
-        set_current_web_session_id(new_llmcore_session_id)
-        logger.info(f"New web session context initiated. Potential LLMCore ID: {new_llmcore_session_id}")
+        api_client = get_api_client()
+
+        # Get optional system message from request
+        request_data = request.get_json() or {}
+        initial_system_message = request_data.get('system_message')
+
+        # Create new session via API
+        new_session_data = await api_client.create_session(initial_system_message)
+        logger.info(f"Created new session via llmcore API: {new_session_data.get('id')}")
+
+        # Update Flask session with the new session ID
+        set_current_web_session_id(new_session_data.get('id'))
 
         # Reset Flask session variables to defaults
         flask_session['rag_enabled'] = False
@@ -56,81 +81,172 @@ def new_session_route() -> Any:
         flask_session['rag_filter'] = None
         flask_session['current_provider_name'] = None
         flask_session['current_model_name'] = None
-        flask_session['system_message'] = ""
+        flask_session['system_message'] = initial_system_message or ""
         flask_session['prompt_template_values'] = {}
         flask_session.modified = True
 
-        response_payload: Dict[str, Any] = {
-            "id": new_llmcore_session_id,
-            "name": None,
-            "messages": [],
-            "rag_settings": {
-                "enabled": flask_session['rag_enabled'],
-                "collection_name": flask_session['rag_collection_name'],
-                "k_value": flask_session['rag_k_value'],
-                "filter": flask_session['rag_filter'],
-            },
-            "llm_settings": {
-                "provider_name": flask_session['current_provider_name'],
-                "model_name": flask_session['current_model_name'],
-                "system_message": flask_session['system_message'],
-            },
-            "prompt_template_values": flask_session['prompt_template_values'],
-        }
-        return jsonify(response_payload), 201
+        logger.info(f"Flask session state reset for new session: {new_session_data.get('id')}")
+
+        # Return the session data from llmcore API
+        return jsonify(new_session_data), 201
+
     except Exception as e:
-        logger.error(f"Error creating new session context: {e}", exc_info=True)
-        return jsonify({"error": f"Failed to initialize new session context: {str(e)}"}), 500
+        logger.error(f"Error creating new session: {e}", exc_info=True)
+        return jsonify({"error": f"Failed to create new session: {str(e)}"}), 500
 
 
 @session_bp.route("/<session_id_to_load>/load", methods=["GET"])
-def load_session_route(session_id_to_load: str) -> Any:
+@async_to_sync_in_flask
+async def load_session_route(session_id_to_load: str) -> Any:
     """
-    Loads an existing LLMCore session by its ID.
-    Currently stubbed - will be implemented when LLMCore API session endpoints are available.
+    Loads an existing LLMCore session by its ID and updates Flask session state.
+
+    Args:
+        session_id_to_load: The ID of the session to load
+
+    Returns:
+        JSON response with session data and applied settings
     """
-    logger.info(f"Session load requested for ID: {session_id_to_load} - returning stubbed response")
-    return jsonify({"error": "Session loading not yet implemented - LLMCore API endpoints pending"}), 501
+    logger.info(f"Session load requested for ID: {session_id_to_load}")
+    try:
+        api_client = get_api_client()
+
+        # Get full session data from llmcore API
+        session_data = await api_client.get_session(session_id_to_load)
+        logger.info(f"Retrieved session data from llmcore API for session: {session_id_to_load}")
+
+        # Update Flask session with the loaded session's ID
+        set_current_web_session_id(session_data.get('id'))
+
+        # Extract and apply session settings to Flask session
+        # Note: The exact structure of session_data depends on llmcore API response format
+        # This implementation assumes reasonable defaults if specific fields are missing
+
+        settings = session_data.get('settings', {})
+        flask_session['rag_enabled'] = settings.get('rag_enabled', False)
+        flask_session['rag_collection_name'] = settings.get('rag_collection_name')
+        flask_session['rag_k_value'] = settings.get('rag_k_value', 3)
+        flask_session['rag_filter'] = settings.get('rag_filter')
+        flask_session['current_provider_name'] = settings.get('provider_name')
+        flask_session['current_model_name'] = settings.get('model_name')
+        flask_session['system_message'] = settings.get('system_message', "")
+        flask_session['prompt_template_values'] = settings.get('prompt_template_values', {})
+        flask_session.modified = True
+
+        logger.info(f"Flask session state updated for loaded session: {session_id_to_load}")
+
+        # Prepare response with session data and applied settings for UI sync
+        response_payload = {
+            "session_data": session_data,
+            "applied_settings": {
+                "rag_enabled": flask_session['rag_enabled'],
+                "rag_collection_name": flask_session['rag_collection_name'],
+                "k_value": flask_session['rag_k_value'],
+                "rag_filter": flask_session['rag_filter'],
+                "current_provider_name": flask_session['current_provider_name'],
+                "current_model_name": flask_session['current_model_name'],
+                "system_message": flask_session['system_message'],
+                "prompt_template_values": flask_session['prompt_template_values']
+            },
+            "context_usage": session_data.get('context_usage'),  # May be null
+            "message": "Session loaded successfully"
+        }
+
+        return jsonify(response_payload)
+
+    except Exception as e:
+        logger.error(f"Error loading session {session_id_to_load}: {e}", exc_info=True)
+        return jsonify({"error": f"Failed to load session: {str(e)}"}), 500
 
 
 @session_bp.route("/<session_id_to_delete>", methods=["DELETE"])
-def delete_session_route(session_id_to_delete: str) -> Any:
+@async_to_sync_in_flask
+async def delete_session_route(session_id_to_delete: str) -> Any:
     """
-    Deletes an LLMCore session by its ID.
-    Currently stubbed - will be implemented when LLMCore API session endpoints are available.
+    Deletes an LLMCore session by its ID via the llmcore API.
+
+    Args:
+        session_id_to_delete: The ID of the session to delete
+
+    Returns:
+        JSON response confirming deletion
     """
-    logger.info(f"Session deletion requested for ID: {session_id_to_delete} - returning stubbed response")
-    return jsonify({"error": "Session deletion not yet implemented - LLMCore API endpoints pending"}), 501
+    logger.info(f"Session deletion requested for ID: {session_id_to_delete}")
+    try:
+        api_client = get_api_client()
+
+        # Delete the session via llmcore API
+        await api_client.delete_session(session_id_to_delete)
+        logger.info(f"Successfully deleted session via llmcore API: {session_id_to_delete}")
+
+        # If the deleted session was the active one, clear the Flask session ID
+        if get_current_web_session_id() == session_id_to_delete:
+            set_current_web_session_id(None)
+            logger.info(f"Cleared active session ID from Flask session: {session_id_to_delete}")
+
+        return jsonify({"message": "Session deleted successfully."})
+
+    except Exception as e:
+        logger.error(f"Error deleting session {session_id_to_delete}: {e}", exc_info=True)
+        return jsonify({"error": f"Failed to delete session: {str(e)}"}), 500
 
 
 @session_bp.route("/<session_id>/rename", methods=["POST"])
-def rename_session_route(session_id: str) -> Any:
+@async_to_sync_in_flask
+async def rename_session_route(session_id: str) -> Any:
     """
-    Renames a persistent session in LLMCore.
-    Currently stubbed - will be implemented when LLMCore API session endpoints are available.
+    Renames a persistent session in LLMCore via the llmcore API.
+
+    Args:
+        session_id: The ID of the session to rename
+
+    Returns:
+        JSON response with updated session data
     """
-    logger.info(f"Session rename requested for ID: {session_id} - returning stubbed response")
-    return jsonify({"error": "Session renaming not yet implemented - LLMCore API endpoints pending"}), 501
+    logger.info(f"Session rename requested for ID: {session_id}")
+    try:
+        # Get the new name from request JSON
+        request_data = request.get_json()
+        if not request_data or 'new_name' not in request_data:
+            return jsonify({"error": "Missing 'new_name' in request body"}), 400
+
+        new_name = request_data['new_name']
+        if not new_name or not new_name.strip():
+            return jsonify({"error": "New name cannot be empty"}), 400
+
+        api_client = get_api_client()
+
+        # Rename the session via llmcore API
+        renamed_session = await api_client.rename_session(session_id, new_name.strip())
+        logger.info(f"Successfully renamed session via llmcore API: {session_id} -> '{new_name.strip()}'")
+
+        return jsonify(renamed_session)
+
+    except Exception as e:
+        logger.error(f"Error renaming session {session_id}: {e}", exc_info=True)
+        return jsonify({"error": f"Failed to rename session: {str(e)}"}), 500
 
 
 @session_bp.route("/<session_id>/messages/<message_id>", methods=["DELETE"])
-def delete_message_from_session_route(session_id: str, message_id: str) -> Any:
+@async_to_sync_in_flask
+async def delete_message_from_session_route(session_id: str, message_id: str) -> Any:
     """
     Deletes a specific message from a given LLMCore session.
-    Currently stubbed - will be implemented when LLMCore API session endpoints are available.
+    Currently not implemented in llmcore API - returns 501 Not Implemented.
     """
-    logger.info(f"Message deletion requested for session {session_id}, message {message_id} - returning stubbed response")
-    return jsonify({"error": "Message deletion not yet implemented - LLMCore API endpoints pending"}), 501
+    logger.info(f"Message deletion requested for session {session_id}, message {message_id} - not yet implemented")
+    return jsonify({"error": "Message deletion not yet implemented - LLMCore API endpoint pending"}), 501
 
 
 @session_bp.route("/<session_id>/metadata", methods=["POST"])
-def update_session_metadata_route(session_id: str) -> Any:
+@async_to_sync_in_flask
+async def update_session_metadata_route(session_id: str) -> Any:
     """
     Updates client-specific metadata for a persistent session.
-    Currently stubbed - will be implemented when LLMCore API session endpoints are available.
+    Currently not implemented in llmcore API - returns 501 Not Implemented.
     """
-    logger.info(f"Session metadata update requested for ID: {session_id} - returning stubbed response")
-    return jsonify({"error": "Session metadata updates not yet implemented - LLMCore API endpoints pending"}), 501
+    logger.info(f"Session metadata update requested for ID: {session_id} - not yet implemented")
+    return jsonify({"error": "Session metadata updates not yet implemented - LLMCore API endpoint pending"}), 501
 
 
-logger.info("Session management routes defined on session_bp (currently stubbed).")
+logger.info("Session management routes defined on session_bp with llmcore API integration.")

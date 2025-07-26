@@ -112,6 +112,88 @@ class LLMCoreAPIClient:
                 if chunk:
                     yield chunk
 
+    # =================================================================================
+    # SECTION: Session Management Methods
+    # =================================================================================
+
+    async def list_sessions(self) -> List[Dict[str, Any]]:
+        """
+        List all available sessions from the llmcore API.
+
+        Returns:
+            List of session metadata dictionaries
+        """
+        client = await self._get_client()
+        response = await client.get("/api/v2/sessions")
+        response.raise_for_status()
+        return response.json()
+
+    async def create_session(self, initial_system_message: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Create a new session via the llmcore API.
+
+        Args:
+            initial_system_message: Optional system message to set for the new session
+
+        Returns:
+            Dictionary containing the new session data
+        """
+        client = await self._get_client()
+        payload = {}
+        if initial_system_message:
+            payload["system_message"] = initial_system_message
+
+        response = await client.post("/api/v2/sessions", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def get_session(self, session_id: str) -> Dict[str, Any]:
+        """
+        Get full details of a single session from the llmcore API.
+
+        Args:
+            session_id: The ID of the session to retrieve
+
+        Returns:
+            Dictionary containing the complete session data including messages
+        """
+        client = await self._get_client()
+        response = await client.get(f"/api/v2/sessions/{session_id}")
+        response.raise_for_status()
+        return response.json()
+
+    async def delete_session(self, session_id: str) -> None:
+        """
+        Delete a session via the llmcore API.
+
+        Args:
+            session_id: The ID of the session to delete
+        """
+        client = await self._get_client()
+        response = await client.delete(f"/api/v2/sessions/{session_id}")
+        response.raise_for_status()
+
+    async def rename_session(self, session_id: str, new_name: str) -> Dict[str, Any]:
+        """
+        Rename a session via the llmcore API.
+
+        Args:
+            session_id: The ID of the session to rename
+            new_name: The new name for the session
+
+        Returns:
+            Dictionary containing the updated session data
+        """
+        client = await self._get_client()
+        payload = {"new_name": new_name}
+        response = await client.post(f"/api/v2/sessions/{session_id}/rename", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    # =================================================================================
+    # SECTION: Existing Methods (Agent, Ingestion, etc.)
+    # =================================================================================
+
     async def run_agent(
         self,
         goal: str,
