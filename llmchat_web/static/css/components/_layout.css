@@ -1,0 +1,163 @@
+/* llmchat_web/static/css/components/_layout.css */
+/* Contains styles for the main application layout, top bar, sidebars, and control bars. */
+
+/* General body styling */
+body {
+    font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+        Arial, sans-serif;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    overflow-x: hidden;
+}
+#app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+/* Top Bar */
+.top-bar {
+    background-color: var(--bg-tertiary);
+    padding: 0.5rem 1rem;
+    color: var(--text-primary);
+    flex-shrink: 0;
+    font-size: 0.85rem;
+}
+.top-bar .status-item {
+    margin-right: 15px;
+}
+.top-bar .status-item .badge {
+    font-size: 0.8rem;
+}
+.top-bar .llmchat-brand {
+    font-weight: bold;
+}
+/* Main Layout */
+.main-layout {
+    display: flex;
+    flex-grow: 1;
+    overflow: hidden;
+}
+/* Left Sidebar */
+.left-sidebar {
+    width: 280px;
+    background-color: var(--bg-quaternary);
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border-primary);
+}
+.left-sidebar h5 {
+    color: var(--text-secondary);
+}
+.left-sidebar .list-group-item {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-primary);
+    color: var(--text-primary);
+    cursor: pointer;
+    margin-bottom: 5px;
+    border-radius: 0.25rem;
+}
+.left-sidebar .list-group-item.active {
+    background-color: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: var(--text-on-accent);
+}
+.left-sidebar .list-group-item:hover {
+    background-color: var(--bg-element-hover);
+}
+.left-sidebar .btn-group .btn {
+    font-size: 0.9rem;
+}
+/* Main Content Area */
+.main-content-area {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--bg-secondary);
+    padding: 0;
+    overflow: hidden;
+}
+.main-content-area .nav-tabs .nav-link {
+    color: var(--text-secondary);
+    border-top-left-radius: 0.25rem;
+    border-top-right-radius: 0.25rem;
+    background-color: var(--bg-tertiary);
+    border-bottom-color: var(--border-secondary);
+    margin-right: 2px;
+}
+.main-content-area .nav-tabs .nav-link.active {
+    color: var(--text-primary);
+    background-color: var(--bg-secondary);
+    border-color: var(--border-primary) var(--border-primary)
+        var(--border-secondary);
+}
+.main-content-area .tab-content {
+    flex-grow: 1;
+    padding: 1rem;
+    overflow-y: auto;
+    background-color: var(--bg-secondary);
+}
+/* Bottom Control Bar */
+.bottom-control-bar {
+    background-color: var(--bg-tertiary);
+    padding: 0;
+    flex-shrink: 0;
+    border-top: 1px solid var(--border-primary);
+}
+.bottom-control-bar .nav-tabs .nav-link {
+    color: var(--text-secondary);
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-bottom-left-radius: 0.25rem;
+    border-bottom-right-radius: 0.25rem;
+    background-color: var(--bg-quaternary);
+    border-top-color: var(--bg-tertiary);
+    margin-right: 2px;
+}
+.bottom-control-bar .nav-tabs .nav-link.active {
+    color: var(--text-primary);
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-primary) var(--border-primary) var(--bg-tertiary);
+}
+.bottom-control-bar .tab-content {
+    padding: 0;
+    background-color: var(--bg-tertiary);
+}
+.bottom-control-bar .form-control,
+.bottom-control-bar .form-select,
+.bottom-control-bar .btn {
+    font-size: 0.9rem;
+}
+.bottom-control-bar .form-control,
+.bottom-control-bar .form-select {
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+}
+.bottom-control-bar .form-control::placeholder {
+    color: var(--text-placeholder);
+}
+.bottom-control-bar .form-check-input {
+    background-color: var(--bg-element-hover);
+    border-color: var(--text-muted);
+}
+.bottom-control-bar .form-check-input:checked {
+    background-color: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .main-layout {
+        flex-direction: column;
+    }
+
+    .left-sidebar {
+        width: 100%;
+        height: auto;
+        max-height: 200px;
+    }
+}

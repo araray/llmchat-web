@@ -1,0 +1,44 @@
+/* llmchat_web/static/css/components/_settings.css */
+/* Contains styles for the Settings tab in the bottom control bar. */
+
+#settings-pane .form-label {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+#settings-pane .form-select,
+#settings-pane .form-control {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+    font-size: 0.9rem;
+}
+#settings-pane .form-select:disabled,
+#settings-pane .form-control:disabled {
+    background-color: var(--bg-element-hover);
+    opacity: 0.7;
+}
+#settings-pane .btn {
+    font-size: 0.9rem;
+}
+#settings-pane h5,
+#settings-pane h6 {
+    color: var(--text-primary);
+    margin-top: 1rem;
+    margin-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border-primary);
+    padding-bottom: 0.25rem;
+}
+
+/* Prompt Template Values Table Styling */
+#prompt-values-table th,
+#prompt-values-table td {
+    font-size: 0.85rem;
+    vertical-align: middle;
+}
+#prompt-values-table .form-control-sm {
+    font-size: 0.85rem;
+}
+#prompt-values-table .btn-sm {
+    padding: 0.2rem 0.4rem;
+    font-size: 0.75rem;
+}

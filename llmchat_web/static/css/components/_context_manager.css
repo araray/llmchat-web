@@ -1,0 +1,71 @@
+/* llmchat_web/static/css/components/_context_manager.css */
+/* Contains styles for the Context Manager tab, including workspace, staging, and history views. */
+
+#contextSubTabsContent {
+    height: 100%;
+}
+#contextSubTabsContent .tab-pane {
+    height: 100%;
+}
+
+.workspace-item,
+.staged-context-item {
+    background-color: var(--bg-element);
+    border: 1px solid var(--border-primary);
+    border-radius: 0.25rem;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+}
+.workspace-item-header,
+.staged-item-header {
+    font-size: 0.9rem;
+    font-weight: bold;
+    color: var(--text-secondary);
+}
+.workspace-item-content-preview,
+.staged-item-content-preview {
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    max-height: 60px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: pre-wrap;
+}
+.workspace-item-actions .btn,
+.staged-item-actions .btn {
+    font-size: 0.75rem;
+    padding: 0.1rem 0.3rem;
+}
+#context-preview-query-input {
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+}
+#context-preview-query-input::placeholder {
+    color: var(--text-placeholder);
+}
+
+/* Style for staged items that were dropped from context by the backend */
+.staged-item-dropped {
+    opacity: 0.6;
+    border-left: 3px solid #dc3545; /* Bootstrap's danger color */
+    background-image: repeating-linear-gradient(
+        -45deg,
+        transparent,
+        transparent 5px,
+        rgba(255, 255, 255, 0.02) 5px,
+        rgba(255, 255, 255, 0.02) 10px
+    );
+}
+
+.staged-item-dropped .staged-item-header {
+    font-style: italic;
+}
+
+/* Prompt Workbench Styling */
+#prompt-workbench-textarea {
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+    resize: vertical;
+}
