@@ -70,10 +70,17 @@
         <script src="{{ url_for('static', filename='js/prompt_manager_ui.js') }}"></script>
         <script src="{{ url_for('static', filename='js/prompt_template_ui.js') }}"></script>
         <script src="{{ url_for('static', filename='js/ingestion_ui.js') }}"></script>
-        <!-- NEW: Agent UI module loaded before chat_ui.js -->
+
+        <!-- START: Refactored Agent Scripts -->
+        <script src="{{ url_for('static', filename='js/agent_api.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/agent_stream.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/agent_tasks.js') }}"></script>
         <script src="{{ url_for('static', filename='js/agent_ui.js') }}"></script>
+        <!-- END: Refactored Agent Scripts -->
+
         <!-- chat_ui.js must come before main_controller.js -->
         <script src="{{ url_for('static', filename='js/chat_ui.js') }}"></script>
+
         <!-- START: Refactored Context Manager Scripts -->
         <script src="{{ url_for('static', filename='js/context_preview_ui.js') }}"></script>
         <script src="{{ url_for('static', filename='js/context_workbench_ui.js') }}"></script>
@@ -81,6 +88,7 @@
         <script src="{{ url_for('static', filename='js/context_history_ui.js') }}"></script>
         <script src="{{ url_for('static', filename='js/context_manager_ui.js') }}"></script>
         <!-- END: Refactored Context Manager Scripts -->
+
         <!-- Main controller/initializer, loaded last. -->
         <script src="{{ url_for('static', filename='js/main_controller.js') }}"></script>
     </body>
