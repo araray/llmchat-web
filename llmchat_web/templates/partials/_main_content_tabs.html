@@ -1,0 +1,823 @@
+<ul class="nav nav-tabs px-2 pt-2" id="mainContentTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button
+            class="nav-link active"
+            id="chat-tab-btn"
+            data-bs-toggle="tab"
+            data-bs-target="#chat-tab-pane"
+            type="button"
+            role="tab"
+            aria-controls="chat-tab-pane"
+            aria-selected="true"
+        >
+            <i class="fas fa-comment-dots"></i> Chat
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button
+            class="nav-link"
+            id="agents-tab-btn"
+            data-bs-toggle="tab"
+            data-bs-target="#agents-tab-pane"
+            type="button"
+            role="tab"
+            aria-controls="agents-tab-pane"
+            aria-selected="false"
+        >
+            <i class="fas fa-robot"></i> Agents
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button
+            class="nav-link"
+            id="context-manager-tab-btn"
+            data-bs-toggle="tab"
+            data-bs-target="#context-manager-tab-pane"
+            type="button"
+            role="tab"
+            aria-controls="context-manager-tab-pane"
+            aria-selected="false"
+        >
+            <i class="fas fa-folder-open"></i> Context Manager
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button
+            class="nav-link"
+            id="prompts-tab-btn"
+            data-bs-toggle="tab"
+            data-bs-target="#prompts-tab-pane"
+            type="button"
+            role="tab"
+            aria-controls="prompts-tab-pane"
+            aria-selected="false"
+        >
+            <i class="fas fa-star"></i> Prompts
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button
+            class="nav-link"
+            id="rag-tab-main-btn"
+            data-bs-toggle="tab"
+            data-bs-target="#rag-pane-main"
+            type="button"
+            role="tab"
+            aria-controls="rag-pane-main"
+            aria-selected="false"
+        >
+            <i class="fas fa-brain"></i> RAG
+        </button>
+    </li>
+</ul>
+<div class="tab-content flex-grow-1 overflow-auto" id="mainContentTabsContent">
+    <div
+        class="tab-pane fade show active tab-pane-full-height"
+        id="chat-tab-pane"
+        role="tabpanel"
+        aria-labelledby="chat-tab-btn"
+        tabindex="0"
+    >
+        <div id="chat-messages" class="flex-grow-1">
+            <div class="message-bubble agent-message">
+                Welcome to LLMChat Web! Start a new session or load an existing
+                one.
+            </div>
+        </div>
+    </div>
+    <!-- START: Enhanced Agents Tab Pane -->
+    <div
+        class="tab-pane fade tab-pane-full-height"
+        id="agents-tab-pane"
+        role="tabpanel"
+        aria-labelledby="agents-tab-btn"
+        tabindex="0"
+    >
+        <div class="row h-100">
+            <!-- Left Column: Goal Input and Task List -->
+            <div class="col-md-6 d-flex flex-column h-100">
+                <div class="mb-3">
+                    <h5><i class="fas fa-bullseye"></i> Agent Goal</h5>
+                    <form id="agent-goal-form">
+                        <div class="mb-2">
+                            <label for="agent-goal-input" class="form-label">
+                                High-level Goal:
+                            </label>
+                            <textarea
+                                class="form-control"
+                                id="agent-goal-input"
+                                rows="3"
+                                placeholder="Describe what you want the agent to accomplish... e.g., 'Research the pros and cons of FastAPI vs Flask and write a summary'"
+                                required
+                            ></textarea>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col-md-6">
+                                <label
+                                    for="agent-provider-select"
+                                    class="form-label form-label-sm"
+                                >
+                                    Provider Override (Optional):
+                                </label>
+                                <select
+                                    class="form-select form-select-sm"
+                                    id="agent-provider-select"
+                                >
+                                    <option value="">
+                                        Use Session Default
+                                    </option>
+                                    <!-- Options populated by JS -->
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label
+                                    for="agent-model-select"
+                                    class="form-label form-label-sm"
+                                >
+                                    Model Override (Optional):
+                                </label>
+                                <select
+                                    class="form-select form-select-sm"
+                                    id="agent-model-select"
+                                >
+                                    <option value="">
+                                        Use Session Default
+                                    </option>
+                                    <!-- Options populated by JS -->
+                                </select>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-rocket"></i> Launch Agent
+                        </button>
+                    </form>
+                </div>
+
+                <hr class="my-3" />
+
+                <div class="d-flex flex-column flex-grow-1">
+                    <h5><i class="fas fa-tasks"></i> Agent Tasks</h5>
+                    <div id="agent-task-list" class="flex-grow-1 overflow-auto">
+                        <p class="text-muted small p-2">
+                            No agent tasks yet. Submit a goal above to get
+                            started.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Task Detail View -->
+            <div class="col-md-6 d-flex flex-column h-100">
+                <!-- Welcome Pane (shown by default) -->
+                <div
+                    id="agent-welcome-pane"
+                    class="text-center p-5 h-100 d-flex flex-column justify-content-center align-items-center"
+                >
+                    <i class="fas fa-robot fa-4x text-muted mb-3"></i>
+                    <h5 class="text-muted mb-3">
+                        Autonomous Agent Control Panel
+                    </h5>
+                    <p class="text-muted">
+                        Submit a high-level goal and watch the agent work
+                        autonomously to achieve it using the Think → Act →
+                        Observe loop.
+                    </p>
+                    <p class="text-muted small">
+                        Select a task from the list to view its detailed
+                        progress and results.
+                    </p>
+                </div>
+
+                <!-- Task Detail View (hidden by default) -->
+                <div
+                    id="agent-task-detail-view"
+                    style="display: none"
+                    class="d-flex flex-column h-100"
+                >
+                    <div id="agent-detail-header" class="mb-3">
+                        <!-- Task details header populated by JS -->
+                    </div>
+
+                    <div
+                        id="agent-stream-container"
+                        class="flex-grow-1 overflow-auto mb-3"
+                        style="min-height: 200px"
+                    >
+                        <!-- Real-time agent progress stream -->
+                    </div>
+
+                    <div
+                        id="agent-result-container"
+                        style="display: none"
+                        class="border rounded p-2 bg-dark"
+                    >
+                        <!-- Final result display -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- END: Enhanced Agents Tab Pane -->
+    <div
+        class="tab-pane fade tab-pane-full-height"
+        id="context-manager-tab-pane"
+        role="tabpanel"
+        aria-labelledby="context-manager-tab-btn"
+        tabindex="0"
+    >
+        <!-- START: New Context Mode Toggle and UI containers -->
+        <div class="d-flex justify-content-end align-items-center mb-2">
+            <div class="form-check form-switch">
+                <input
+                    class="form-check-input"
+                    type="checkbox"
+                    role="switch"
+                    id="context-mode-toggle"
+                />
+                <label class="form-check-label small" for="context-mode-toggle"
+                    >UI Managed Context</label
+                >
+            </div>
+        </div>
+
+        <!-- LLMCore Managed UI (default) -->
+        <div id="llmcore-managed-context-ui" class="d-flex-fill-column">
+            <ul class="nav nav-pills mb-3" id="contextSubTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button
+                        class="nav-link active"
+                        id="workspace-subtab-btn"
+                        data-bs-toggle="tab"
+                        data-bs-target="#workspace-subtab-pane"
+                        type="button"
+                        role="tab"
+                        aria-controls="workspace-subtab-pane"
+                        aria-selected="true"
+                    >
+                        <i class="fas fa-briefcase"></i> Workspace & Staging
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button
+                        class="nav-link"
+                        id="history-subtab-btn"
+                        data-bs-toggle="tab"
+                        data-bs-target="#history-subtab-pane"
+                        type="button"
+                        role="tab"
+                        aria-controls="history-subtab-pane"
+                        aria-selected="false"
+                    >
+                        <i class="fas fa-history"></i> History Context
+                    </button>
+                </li>
+            </ul>
+            <div class="tab-content flex-grow-1" id="contextSubTabsContent">
+                <div
+                    class="tab-pane fade show active tab-pane-full-height"
+                    id="workspace-subtab-pane"
+                    role="tabpanel"
+                    aria-labelledby="workspace-subtab-btn"
+                >
+                    <!-- Original Two-Column Layout Goes Here -->
+                    <div class="row h-100">
+                        <div class="col-md-6 d-flex flex-column h-100">
+                            <h5>
+                                <i class="fas fa-briefcase"></i>
+                                Workspace Items (Context Pool)
+                            </h5>
+                            <div
+                                id="workspace-items-list"
+                                class="mb-3 border rounded p-2 flex-grow-1"
+                                style="overflow-y: auto"
+                            >
+                                <p class="text-muted p-2">
+                                    Workspace items for the current session will
+                                    appear here...
+                                </p>
+                            </div>
+                            <div class="mt-auto">
+                                <h6>
+                                    <i class="fas fa-plus-circle"></i>
+                                    Add Text Snippet
+                                </h6>
+                                <form id="form-add-text-snippet" class="mb-3">
+                                    <div class="mb-2">
+                                        <label
+                                            for="text-snippet-content"
+                                            class="form-label form-label-sm"
+                                            >Content:</label
+                                        >
+                                        <textarea
+                                            class="form-control form-control-sm"
+                                            id="text-snippet-content"
+                                            rows="2"
+                                            required
+                                        ></textarea>
+                                    </div>
+                                    <div class="mb-2">
+                                        <label
+                                            for="text-snippet-id"
+                                            class="form-label form-label-sm"
+                                            >Optional Item ID:</label
+                                        >
+                                        <input
+                                            type="text"
+                                            class="form-control form-control-sm"
+                                            id="text-snippet-id"
+                                            placeholder="Auto-generated if blank"
+                                        />
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        class="btn btn-sm btn-success"
+                                    >
+                                        <i class="fas fa-plus"></i> Add Snippet
+                                    </button>
+                                </form>
+                                <hr />
+                                <h6>
+                                    <i class="fas fa-file-medical"></i>
+                                    Add File by Server Path
+                                </h6>
+                                <form id="form-add-file-by-path" class="mb-2">
+                                    <div class="mb-2">
+                                        <label
+                                            for="file-path-input"
+                                            class="form-label form-label-sm"
+                                            >Server File Path:</label
+                                        >
+                                        <input
+                                            type="text"
+                                            class="form-control form-control-sm"
+                                            id="file-path-input"
+                                            placeholder="/path/to/your/file_on_server.txt"
+                                            required
+                                        />
+                                    </div>
+                                    <div class="mb-2">
+                                        <label
+                                            for="file-item-id"
+                                            class="form-label form-label-sm"
+                                            >Optional Item ID:</label
+                                        >
+                                        <input
+                                            type="text"
+                                            class="form-control form-control-sm"
+                                            id="file-item-id"
+                                            placeholder="Auto-generated if blank"
+                                        />
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        class="btn btn-sm btn-success"
+                                    >
+                                        <i class="fas fa-plus"></i> Add File
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                        <div class="col-md-6 d-flex flex-column h-100">
+                            <h5>
+                                <i class="fas fa-cogs"></i> Active Context
+                                Specification (for next prompt)
+                            </h5>
+                            <div class="input-group mb-2">
+                                <span class="input-group-text"
+                                    ><i class="fas fa-search"></i
+                                ></span>
+                                <input
+                                    type="text"
+                                    class="form-control form-control-sm"
+                                    id="context-preview-query-input"
+                                    placeholder="Optional: Type next query for more accurate preview..."
+                                />
+                            </div>
+                            <div
+                                id="active-context-spec-list"
+                                class="border rounded p-2 mb-2 flex-grow-1"
+                                style="overflow-y: auto"
+                            >
+                                <p class="text-muted p-2">
+                                    Staged items for the next prompt will appear
+                                    here. Add from Workspace, History, or create
+                                    new.
+                                </p>
+                            </div>
+                            <div class="mt-auto">
+                                <p class="small text-muted">
+                                    Add to Active Context:
+                                </p>
+                                <div class="btn-group w-100 mb-2" role="group">
+                                    <button
+                                        class="btn btn-sm btn-outline-primary"
+                                        id="btn-stage-from-workspace"
+                                        title="Select from Workspace Items"
+                                    >
+                                        <i class="fas fa-briefcase"></i>
+                                        Workspace
+                                    </button>
+                                    <button
+                                        class="btn btn-sm btn-outline-primary"
+                                        id="btn-stage-from-history"
+                                        title="Select from Chat History"
+                                    >
+                                        <i class="fas fa-history"></i>
+                                        History
+                                    </button>
+                                    <button
+                                        class="btn btn-sm btn-outline-primary"
+                                        id="btn-stage-new-file"
+                                        title="Add a new file by path"
+                                    >
+                                        <i class="fas fa-file-alt"></i>
+                                        New File
+                                    </button>
+                                    <button
+                                        class="btn btn-sm btn-outline-primary"
+                                        id="btn-stage-new-text"
+                                        title="Add a new text snippet"
+                                    >
+                                        <i class="fas fa-file-signature"></i>
+                                        New Text
+                                    </button>
+                                </div>
+                                <button
+                                    class="btn btn-sm btn-info w-100"
+                                    id="btn-preview-full-context"
+                                >
+                                    <i class="fas fa-eye"></i> Preview Full
+                                    Context for Next Prompt
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div
+                    class="tab-pane fade tab-pane-full-height"
+                    id="history-subtab-pane"
+                    role="tabpanel"
+                    aria-labelledby="history-subtab-btn"
+                >
+                    <!-- New UI for History Context Management -->
+                    <h5>
+                        <i class="fas fa-history"></i> Conversation History
+                        Context
+                    </h5>
+                    <p class="small text-muted">
+                        Select messages to include in the next prompt's context.
+                        Unchecked messages will be excluded.
+                    </p>
+                    <div id="history-context-toolbar" class="mb-2">
+                        <div
+                            class="btn-group btn-group-sm"
+                            role="group"
+                            aria-label="History context tools"
+                        >
+                            <button
+                                type="button"
+                                class="btn btn-outline-secondary"
+                                id="history-context-select-all"
+                            >
+                                <i class="fas fa-check-double"></i>
+                                Select All
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-outline-secondary"
+                                id="history-context-deselect-all"
+                            >
+                                <i class="far fa-square"></i> Deselect All
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-outline-secondary"
+                                id="history-context-invert"
+                            >
+                                <i class="fas fa-retweet"></i> Invert
+                            </button>
+                        </div>
+                    </div>
+                    <div
+                        id="history-context-message-list"
+                        class="border rounded p-2 flex-grow-1 overflow-auto"
+                    >
+                        <p class="text-muted p-2">
+                            Load a session to manage its history context...
+                        </p>
+                    </div>
+                    <div class="mt-2">
+                        <button
+                            class="btn btn-primary btn-sm"
+                            id="btn-save-context-selection"
+                        >
+                            <i class="fas fa-save"></i> Save Context Selection
+                        </button>
+                        <small class="text-muted ms-2"
+                            >Selection is saved to the session's
+                            metadata.</small
+                        >
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- UI Managed UI (hidden by default) -->
+        <div
+            id="ui-managed-context-ui"
+            class="d-flex flex-column h-100"
+            style="display: none"
+        >
+            <h5><i class="fas fa-edit"></i> Prompt Workbench (UI Managed)</h5>
+            <p class="small text-muted">
+                In this mode, the text below is sent directly to the LLM,
+                bypassing LLMCore's context assembly. Your message from the main
+                chat input will still be saved to history.
+            </p>
+            <button
+                id="btn-populate-workbench-from-context"
+                class="btn btn-sm btn-secondary mb-2"
+            >
+                <i class="fas fa-file-import"></i> Populate from Current LLMCore
+                Context
+            </button>
+            <textarea
+                id="prompt-workbench-textarea"
+                class="form-control flex-grow-1"
+                style="font-family: monospace; font-size: 0.9em"
+                placeholder="Enter your full, raw prompt here..."
+            ></textarea>
+            <div
+                id="prompt-workbench-token-count"
+                class="text-end text-muted small mt-1"
+            >
+                Tokens: 0
+            </div>
+        </div>
+        <!-- END: New Context Mode Toggle and UI containers -->
+    </div>
+    <!-- START: New Prompt Manager Tab Pane -->
+    <div
+        class="tab-pane fade tab-pane-full-height"
+        id="prompts-tab-pane"
+        role="tabpanel"
+        aria-labelledby="prompts-tab-btn"
+        tabindex="0"
+    >
+        <div class="row h-100">
+            <!-- Left Column: Preset List -->
+            <div class="col-md-4 d-flex flex-column h-100">
+                <h5><i class="fas fa-list-ul"></i> Saved Presets</h5>
+                <div class="input-group input-group-sm mb-2">
+                    <span class="input-group-text" id="basic-addon1"
+                        ><i class="fas fa-search"></i
+                    ></span>
+                    <input
+                        type="text"
+                        class="form-control"
+                        id="prompt-preset-search-input"
+                        placeholder="Search presets..."
+                    />
+                </div>
+                <div
+                    id="prompt-preset-list"
+                    class="list-group flex-grow-1 overflow-auto mb-2"
+                >
+                    <!-- Preset list will be populated by JS -->
+                    <p class="text-muted small p-2">Loading presets...</p>
+                </div>
+                <button
+                    class="btn btn-primary btn-sm"
+                    id="btn-new-prompt-preset"
+                >
+                    <i class="fas fa-plus-circle"></i> New Preset
+                </button>
+            </div>
+
+            <!-- Right Column: Preset Editor -->
+            <div class="col-md-8 d-flex flex-column h-100">
+                <div id="prompt-preset-editor-pane" class="d-none">
+                    <div
+                        class="d-flex justify-content-between align-items-center"
+                    >
+                        <h5><i class="fas fa-edit"></i> Preset Editor</h5>
+                        <div>
+                            <button
+                                class="btn btn-success btn-sm"
+                                id="btn-save-prompt-preset"
+                            >
+                                <i class="fas fa-save"></i> Save
+                            </button>
+                            <button
+                                class="btn btn-danger btn-sm"
+                                id="btn-delete-prompt-preset"
+                            >
+                                <i class="fas fa-trash-alt"></i> Delete
+                            </button>
+                        </div>
+                    </div>
+                    <hr class="mt-2 mb-3" />
+                    <form id="form-prompt-preset-editor">
+                        <input
+                            type="hidden"
+                            id="prompt-preset-editor-original-name"
+                        />
+                        <div class="mb-3">
+                            <label for="prompt-preset-name" class="form-label"
+                                >Preset Name</label
+                            >
+                            <input
+                                type="text"
+                                class="form-control"
+                                id="prompt-preset-name"
+                                required
+                            />
+                        </div>
+                        <div class="mb-3">
+                            <label
+                                for="prompt-preset-description"
+                                class="form-label"
+                                >Description (Optional)</label
+                            >
+                            <textarea
+                                class="form-control"
+                                id="prompt-preset-description"
+                                rows="2"
+                            ></textarea>
+                        </div>
+
+                        <h6><i class="fas fa-cubes"></i> Preset Items</h6>
+                        <div
+                            id="prompt-preset-items-list"
+                            class="border rounded p-2 mb-2"
+                            style="
+                                min-height: 150px;
+                                max-height: 250px;
+                                overflow-y: auto;
+                            "
+                        >
+                            <!-- Preset items will be populated by JS -->
+                        </div>
+                        <button
+                            type="button"
+                            class="btn btn-outline-secondary btn-sm mb-3"
+                            id="btn-add-preset-item"
+                        >
+                            <i class="fas fa-plus"></i> Add Item
+                        </button>
+
+                        <h6>
+                            <i class="fas fa-key"></i> Template Values
+                            (Placeholders)
+                        </h6>
+                        <p class="small text-muted">
+                            Define key-value pairs (e.g., `language: Python`)
+                            for this preset.
+                        </p>
+                        <div id="prompt-preset-template-values-container">
+                            <!-- Template values UI will be inserted here by JS, similar to settings tab -->
+                        </div>
+                    </form>
+                </div>
+                <div
+                    id="prompt-preset-welcome-pane"
+                    class="text-center p-5 h-100 d-flex flex-column justify-content-center align-items-center"
+                >
+                    <i class="fas fa-star fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">
+                        Select a preset to view or edit, or create a new one.
+                    </h5>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- END: New Prompt Manager Tab Pane -->
+    <div
+        class="tab-pane fade"
+        id="rag-pane-main"
+        role="tabpanel"
+        aria-labelledby="rag-tab-main-btn"
+        tabindex="0"
+    >
+        <h6><i class="fas fa-cogs"></i> RAG Configuration</h6>
+        <form id="rag-controls-form">
+            <div class="row g-2 align-items-center">
+                <div class="col-auto">
+                    <div class="form-check form-switch">
+                        <input
+                            class="form-check-input"
+                            type="checkbox"
+                            role="switch"
+                            id="rag-toggle-switch"
+                        />
+                        <label
+                            class="form-check-label small"
+                            for="rag-toggle-switch"
+                            >Enable RAG</label
+                        >
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <label
+                        for="rag-collection-select"
+                        class="form-label form-label-sm visually-hidden"
+                        >RAG Collection</label
+                    >
+                    <select
+                        class="form-select form-select-sm"
+                        id="rag-collection-select"
+                        aria-label="Select RAG Collection"
+                        disabled
+                    >
+                        <option selected value="">Select Collection...</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label
+                        for="rag-k-value"
+                        class="form-label form-label-sm visually-hidden"
+                        >K Value</label
+                    >
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text">K:</span>
+                        <input
+                            type="number"
+                            class="form-control"
+                            id="rag-k-value"
+                            value="3"
+                            min="1"
+                            max="20"
+                            disabled
+                        />
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <label
+                        for="rag-filter-input"
+                        class="form-label form-label-sm visually-hidden"
+                        >Metadata Filter</label
+                    >
+                    <input
+                        type="text"
+                        class="form-control form-control-sm"
+                        id="rag-filter-input"
+                        placeholder="Metadata Filter (JSON)..."
+                        disabled
+                    />
+                </div>
+                <div class="col-auto">
+                    <button
+                        type="button"
+                        class="btn btn-sm btn-success"
+                        id="btn-ingest-data"
+                        title="Ingest new data into a RAG collection"
+                    >
+                        <i class="fas fa-database"></i> Ingest Data
+                    </button>
+                </div>
+            </div>
+        </form>
+
+        <hr class="my-3" />
+        <h6><i class="fas fa-search"></i> Direct RAG Search</h6>
+        <form id="direct-rag-search-form">
+            <div class="input-group input-group-sm mb-2">
+                <input
+                    type="text"
+                    class="form-control"
+                    id="direct-rag-search-query"
+                    placeholder="Enter search query..."
+                    required
+                />
+                <button
+                    class="btn btn-info"
+                    type="submit"
+                    id="btn-direct-rag-search"
+                >
+                    <i class="fas fa-search"></i> Search
+                </button>
+            </div>
+        </form>
+        <p class="small text-muted mt-1">
+            Uses current RAG settings (collection, K, filter) for the search.
+            Results will appear in a modal.
+        </p>
+
+        <!-- Start: New RAG Results Display Area -->
+        <hr class="my-3" />
+        <h6>
+            <i class="fas fa-book-open"></i> Retrieved Documents for Last Chat
+        </h6>
+        <div
+            id="rag-retrieved-docs-display"
+            class="border rounded p-2 d-none"
+            style="max-height: 250px; overflow-y: auto"
+        >
+            <p class="text-muted small">
+                After a RAG-enabled chat, retrieved documents will be displayed
+                here.
+            </p>
+        </div>
+        <!-- End: New RAG Results Display Area -->
+    </div>
+</div>

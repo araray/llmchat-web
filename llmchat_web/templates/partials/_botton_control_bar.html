@@ -1,0 +1,238 @@
+<nav class="bottom-control-bar">
+    <ul class="nav nav-tabs nav-fill" id="bottomControlTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button
+                class="nav-link active"
+                id="chat-input-tab-btn"
+                data-bs-toggle="tab"
+                data-bs-target="#chat-input-pane"
+                type="button"
+                role="tab"
+                aria-controls="chat-input-pane"
+                aria-selected="true"
+            >
+                <i class="fas fa-keyboard"></i> Chat Input
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button
+                class="nav-link"
+                id="settings-tab-btn"
+                data-bs-toggle="tab"
+                data-bs-target="#settings-pane"
+                type="button"
+                role="tab"
+                aria-controls="settings-pane"
+                aria-selected="false"
+            >
+                <i class="fas fa-cog"></i> Settings
+            </button>
+        </li>
+    </ul>
+    <div class="tab-content" id="bottomControlTabsContent">
+        <div
+            class="tab-pane fade show active"
+            id="chat-input-pane"
+            role="tabpanel"
+            aria-labelledby="chat-input-tab-btn"
+            tabindex="0"
+        >
+            <!-- START: Prompt Shortcut Integration -->
+            <div
+                id="quick-prompt-bar"
+                class="p-2"
+                style="
+                    border-bottom: 1px solid var(--border-primary);
+                    display: none;
+                "
+            >
+                <!-- Favorite prompts will be populated here by JS -->
+                <small class="text-muted">Quick Prompts:</small>
+            </div>
+            <!-- END: Prompt Shortcut Integration -->
+            <div id="chat-input-area" class="p-2">
+                <div class="input-group">
+                    <textarea
+                        class="form-control"
+                        id="chat-input"
+                        rows="3"
+                        placeholder="Type your message..."
+                    ></textarea>
+                    <!-- START: Prompt Shortcut Button -->
+                    <button
+                        class="btn btn-outline-secondary"
+                        type="button"
+                        id="btn-show-prompt-shortcuts"
+                        title="Show Prompt Shortcuts"
+                    >
+                        <i class="fas fa-magic"></i>
+                    </button>
+                    <!-- END: Prompt Shortcut Button -->
+                    <button
+                        class="btn btn-primary"
+                        type="button"
+                        id="send-chat-message"
+                    >
+                        <i class="fas fa-paper-plane"></i> Send
+                    </button>
+                </div>
+                <div class="mt-1 text-end">
+                    <small class="text-muted" id="chat-input-token-estimate"
+                        >Tokens: 0</small
+                    >
+                </div>
+            </div>
+        </div>
+        <div
+            class="tab-pane fade p-2"
+            id="settings-pane"
+            role="tabpanel"
+            aria-labelledby="settings-tab-btn"
+            tabindex="0"
+        >
+            <h5><i class="fas fa-robot"></i> LLM Configuration</h5>
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label for="llm-provider-select" class="form-label"
+                        >Provider:</label
+                    >
+                    <select
+                        class="form-select"
+                        id="llm-provider-select"
+                        aria-label="Select LLM Provider"
+                    >
+                        <option selected value="">Loading providers...</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label for="llm-model-select" class="form-label"
+                        >Model:</label
+                    >
+                    <select
+                        class="form-select"
+                        id="llm-model-select"
+                        aria-label="Select LLM Model"
+                        disabled
+                    >
+                        <option selected value="">Select provider first</option>
+                    </select>
+                </div>
+            </div>
+            <button
+                type="button"
+                class="btn btn-primary btn-sm mb-3"
+                id="btn-apply-llm-settings"
+            >
+                <i class="fas fa-check-circle"></i> Apply LLM Settings
+            </button>
+
+            <hr class="my-3" />
+
+            <h5><i class="fas fa-user-cog"></i> System Message</h5>
+            <div class="mb-3">
+                <label for="system-message-input" class="form-label"
+                    >Set System Message for current session:</label
+                >
+                <textarea
+                    class="form-control"
+                    id="system-message-input"
+                    rows="3"
+                    placeholder="e.g., You are a helpful assistant specializing in Python programming."
+                ></textarea>
+            </div>
+            <button
+                type="button"
+                class="btn btn-primary btn-sm mb-3"
+                id="btn-apply-system-message"
+            >
+                <i class="fas fa-save"></i> Apply System Message
+            </button>
+
+            <hr class="my-3" />
+            <h6>
+                <i class="fas fa-file-code"></i> Prompt Template Values (RAG)
+            </h6>
+            <p class="small text-muted">
+                Define custom key-value pairs for placeholders (e.g.,
+                <code>{my_key}</code>) in your RAG prompt template.
+            </p>
+            <div
+                class="table-responsive mb-2"
+                style="max-height: 200px; overflow-y: auto"
+            >
+                <table
+                    class="table table-sm table-dark table-striped table-hover"
+                    id="prompt-values-table"
+                >
+                    <thead>
+                        <tr>
+                            <th scope="col" style="width: 35%">Key</th>
+                            <th scope="col" style="width: 45%">Value</th>
+                            <th scope="col" style="width: 20%">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="prompt-values-tbody">
+                        <tr>
+                            <td colspan="3" class="text-center text-muted">
+                                No prompt values set.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <form
+                id="form-add-prompt-value"
+                class="row gx-2 gy-2 align-items-end mb-2"
+            >
+                <div class="col-md-4">
+                    <label
+                        for="new-prompt-key"
+                        class="form-label form-label-sm visually-hidden"
+                        >New Key</label
+                    >
+                    <input
+                        type="text"
+                        class="form-control form-control-sm"
+                        id="new-prompt-key"
+                        placeholder="Enter Key"
+                        required
+                    />
+                </div>
+                <div class="col-md-5">
+                    <label
+                        for="new-prompt-value"
+                        class="form-label form-label-sm visually-hidden"
+                        >New Value</label
+                    >
+                    <input
+                        type="text"
+                        class="form-control form-control-sm"
+                        id="new-prompt-value"
+                        placeholder="Enter Value"
+                        required
+                    />
+                </div>
+                <div class="col-md-3">
+                    <button type="submit" class="btn btn-success btn-sm w-100">
+                        <i class="fas fa-plus"></i> Add Value
+                    </button>
+                </div>
+            </form>
+            <button
+                type="button"
+                class="btn btn-danger btn-sm"
+                id="btn-clear-all-prompt-values"
+            >
+                <i class="fas fa-trash-alt"></i> Clear All Values
+            </button>
+            <hr class="my-3" />
+            <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                id="btn-view-app-logs"
+            >
+                <i class="fas fa-stream"></i> View Application Logs
+            </button>
+        </div>
+    </div>
+</nav>
