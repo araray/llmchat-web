@@ -74,7 +74,13 @@
         <script src="{{ url_for('static', filename='js/agent_ui.js') }}"></script>
         <!-- chat_ui.js must come before main_controller.js -->
         <script src="{{ url_for('static', filename='js/chat_ui.js') }}"></script>
+        <!-- START: Refactored Context Manager Scripts -->
+        <script src="{{ url_for('static', filename='js/context_preview_ui.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/context_workbench_ui.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/context_workspace_ui.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/context_history_ui.js') }}"></script>
         <script src="{{ url_for('static', filename='js/context_manager_ui.js') }}"></script>
+        <!-- END: Refactored Context Manager Scripts -->
         <!-- Main controller/initializer, loaded last. -->
         <script src="{{ url_for('static', filename='js/main_controller.js') }}"></script>
     </body>
