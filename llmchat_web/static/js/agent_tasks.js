@@ -3,8 +3,12 @@
 /**
  * @file agent_tasks.js
  * @description Manages the state and lifecycle of agent tasks.
- * This module handles adding tasks, polling for their status, rendering the
- * task list, and displaying final results.
+ *
+ * REFACTORED: Removed local polling logic - now reads from global TaskMonitor state
+ * and focuses on agent-specific UI rendering and interaction.
+ *
+ * This module handles rendering the task list, displaying task details, and managing
+ * agent-specific UI state while delegating actual task monitoring to TaskMonitor.
  *
  * Depends on:
  * - utils.js (for global state, escapeHtml, showToast)
@@ -12,84 +16,103 @@
  * - agent_stream.js (to initiate streaming)
  */
 
-// Global state for agent tasks
+// Global state for agent tasks (backward compatibility)
 window.agentTasks = new Map(); // task_id -> task object
 
 /**
- * Adds a new task to the manager and starts polling.
+ * Legacy function maintained for backward compatibility.
+ * Now delegates to TaskMonitor while updating local agent state.
  * @param {object} newTask - The initial task object.
  */
 function addTaskToManager(newTask) {
+  // --- REFACTORED: Remove local polling, delegate to TaskMonitor ---
+  // **Rationale Block**:
+  // Pre-state: addTaskToManager maintained separate polling loop via startTaskStatusPolling
+  // Limitation: Duplicate polling logic, inefficient resource usage, state inconsistency
+  // Decision Path: Remove polling responsibility, delegate to TaskMonitor, maintain UI state only
+  // Post-state: TaskMonitor handles polling, agent_tasks focuses on agent-specific UI rendering
+
   window.agentTasks.set(newTask.task_id, newTask);
   renderAgentTaskList();
-  startTaskStatusPolling(newTask.task_id);
-}
 
-/**
- * Starts polling for task status updates and manages the overall task lifecycle.
- * @param {string} taskId - The unique identifier of the task to monitor.
- */
-function startTaskStatusPolling(taskId) {
-  const pollInterval = 2000; // Poll every 2 seconds
+  // TaskMonitor should already be handling this task, but ensure it's tracked
+  if (
+    typeof TaskMonitor !== "undefined" &&
+    TaskMonitor.addTask &&
+    !window.allActiveTasks.has(newTask.task_id)
+  ) {
+    TaskMonitor.addTask({
+      task_id: newTask.task_id,
+      title: newTask.goal || "Agent Task",
+      type: "Agent",
+      status: newTask.status || "submitted",
+      metadata: {
+        goal: newTask.goal,
+        provider: newTask.provider,
+        model: newTask.model,
+      },
+    });
+  }
 
-  const pollFunction = async () => {
-    try {
-      const statusData = await apiGetTaskStatus(taskId);
-      const task = window.agentTasks.get(taskId);
-
-      if (task) {
-        const oldStatus = task.status;
-        task.status = statusData.status;
-        task.result_available = statusData.result_available;
-
-        if (oldStatus !== task.status) {
-          console.log(
-            `AGENT_TASKS: Task ${taskId} status changed: ${oldStatus} -> ${task.status}`,
-          );
-          renderAgentTaskList();
-        }
-
-        const isFinished =
-          task.status === "complete" || task.status === "failed";
-        if (isFinished) {
-          const activeStream = window.activeTaskStreams.get(taskId);
-          if (activeStream) {
-            activeStream.close();
-            window.activeTaskStreams.delete(taskId);
-          }
-          if (task.result_available) {
-            await fetchAndDisplayTaskResult(taskId);
-          }
-        } else {
-          setTimeout(pollFunction, pollInterval);
-        }
-      }
-    } catch (error) {
-      console.error(
-        `AGENT_TASKS: Error polling status for task ${taskId}:`,
-        error,
-      );
-      setTimeout(pollFunction, pollInterval * 2); // Retry on error
-    }
-  };
-
-  pollFunction();
+  console.log(
+    `AGENT_TASKS: Task ${newTask.task_id} added to agent tracking (polling delegated to TaskMonitor)`,
+  );
 }
 
 /**
  * Renders the list of agent tasks in the left panel.
+ * Now reads from both local agentTasks and global allActiveTasks for consistency.
  */
 function renderAgentTaskList() {
   const taskListContainer = document.getElementById("agent-task-list");
   if (!taskListContainer) return;
 
-  if (window.agentTasks.size === 0) {
+  // Merge tasks from both local and global state for comprehensive view
+  const allTasks = new Map();
+
+  // Add local agent tasks
+  for (const [taskId, task] of window.agentTasks.entries()) {
+    allTasks.set(taskId, { ...task, source: "local" });
+  }
+
+  // Add/update with global TaskMonitor state if available
+  if (typeof window.allActiveTasks !== "undefined") {
+    for (const [taskId, globalTask] of window.allActiveTasks.entries()) {
+      if (globalTask.type === "Agent") {
+        const localTask = allTasks.get(taskId);
+        if (localTask) {
+          // Update local task with global state
+          allTasks.set(taskId, {
+            ...localTask,
+            status: globalTask.status,
+            result_available: globalTask.result_available,
+            last_updated: globalTask.last_updated,
+            source: "merged",
+          });
+        } else {
+          // Add global task to local view
+          allTasks.set(taskId, {
+            task_id: taskId,
+            goal: globalTask.title || globalTask.metadata?.goal || "Agent Task",
+            status: globalTask.status,
+            created_at: globalTask.created_at,
+            provider: globalTask.metadata?.provider || "default",
+            model: globalTask.metadata?.model || "default",
+            result_available: globalTask.result_available,
+            source: "global",
+          });
+        }
+      }
+    }
+  }
+
+  if (allTasks.size === 0) {
     taskListContainer.innerHTML =
       '<p class="text-muted small p-2">No agent tasks yet. Submit a goal to get started.</p>';
     return;
   }
 
-  const tasks = Array.from(window.agentTasks.values()).sort(
+  const tasks = Array.from(allTasks.values()).sort(
     (a, b) => new Date(b.created_at) - new Date(a.created_at),
   );
 
@@ -111,6 +134,7 @@ function renderAgentTaskList() {
             ID: ${escapeHtml(taskIdShort)} |
             Model: ${escapeHtml(task.model)} |
             ${new Date(task.created_at).toLocaleTimeString()}
+            ${task.source !== "local" ? " • " + task.source : ""}
           </small>
         </div>
       </div>
@@ -129,6 +153,7 @@ function getStatusBadgeClass(status) {
   switch (status.toLowerCase()) {
     case "pending":
     case "queued":
+    case "submitted":
       return "bg-secondary";
     case "running":
     case "in_progress":
@@ -149,7 +174,12 @@ function getStatusBadgeClass(status) {
  * @param {string} taskId - The task ID to select.
  */
 function selectTaskForDetailView(taskId) {
-  const task = window.agentTasks.get(taskId);
+  // Try to get task from global state first, then fall back to local
+  let task = window.allActiveTasks?.get(taskId);
+  if (!task) {
+    task = window.agentTasks.get(taskId);
+  }
+
   if (!task) return;
 
   document.querySelectorAll(".agent-task-item").forEach((item) => {
@@ -162,13 +192,19 @@ function selectTaskForDetailView(taskId) {
   const welcomePane = document.getElementById("agent-welcome-pane");
   const detailHeader = document.getElementById("agent-detail-header");
 
+  // Use task data from global state if available, otherwise local
+  const displayGoal = task.title || task.goal || "Agent Task";
+  const displayProvider = task.metadata?.provider || task.provider || "default";
+  const displayModel = task.metadata?.model || task.model || "default";
+  const displayStatus = task.status || "unknown";
+
   detailHeader.innerHTML = `
     <h5><i class="fas fa-robot"></i> Agent Task Details</h5>
     <div class="agent-detail-meta">
-      <strong>Goal:</strong> ${escapeHtml(task.goal)}<br>
-      <strong>Status:</strong> <span class="badge ${getStatusBadgeClass(task.status)}">${escapeHtml(task.status)}</span><br>
-      <strong>Model:</strong> ${escapeHtml(task.provider)}/${escapeHtml(task.model)}<br>
-      <strong>Task ID:</strong> <code>${escapeHtml(task.task_id)}</code>
+      <strong>Goal:</strong> ${escapeHtml(displayGoal)}<br>
+      <strong>Status:</strong> <span class="badge ${getStatusBadgeClass(displayStatus)}">${escapeHtml(displayStatus)}</span><br>
+      <strong>Model:</strong> ${escapeHtml(displayProvider)}/${escapeHtml(displayModel)}<br>
+      <strong>Task ID:</strong> <code>${escapeHtml(taskId)}</code>
     </div>
   `;
 
@@ -178,13 +214,17 @@ function selectTaskForDetailView(taskId) {
   const streamContainer = document.getElementById("agent-stream-container");
   const resultContainer = document.getElementById("agent-result-container");
 
-  if (task.status === "running" || task.status === "in_progress") {
+  if (displayStatus === "running" || displayStatus === "in_progress") {
     streamAgentProgress(taskId);
-  } else if (task.status === "complete" && task.result_available) {
+  } else if (displayStatus === "complete" && task.result_available) {
     streamContainer.innerHTML =
       '<p class="text-muted">Task completed. See result below.</p>';
     fetchAndDisplayTaskResult(taskId);
-  } else if (task.status === "pending" || task.status === "queued") {
+  } else if (
+    displayStatus === "pending" ||
+    displayStatus === "queued" ||
+    displayStatus === "submitted"
+  ) {
     streamContainer.innerHTML =
       '<p class="text-muted">Task is queued. Progress will appear here.</p>';
     resultContainer.style.display = "none";
@@ -198,10 +238,12 @@ function selectTaskForDetailView(taskId) {
 async function fetchAndDisplayTaskResult(taskId) {
   try {
     const resultData = await apiGetTaskResult(taskId);
-    const task = window.agentTasks.get(taskId);
-    if (task) {
-      task.result = resultData.result;
-      task.final_status = resultData.status;
+
+    // Update both local and global task state
+    const localTask = window.agentTasks.get(taskId);
+    if (localTask) {
+      localTask.result = resultData.result;
+      localTask.final_status = resultData.status;
     }
 
     const resultContainer = document.getElementById("agent-result-container");
@@ -238,6 +280,16 @@ function initAgentTasksEventListeners() {
       }
     });
   }
+
+  // Subscribe to TaskMonitor updates to refresh agent task list
+  if (typeof TaskMonitor !== "undefined") {
+    // Set up periodic refresh to sync with TaskMonitor state
+    setInterval(() => {
+      renderAgentTaskList();
+    }, 2000); // Refresh every 2 seconds to stay in sync
+  }
 }
 
-console.log("AGENT_TASKS: Agent tasks module loaded.");
+console.log(
+  "AGENT_TASKS: Agent tasks module loaded (refactored for TaskMonitor integration).",
+);

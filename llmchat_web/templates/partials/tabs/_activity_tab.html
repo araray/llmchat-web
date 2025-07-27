@@ -1,0 +1,41 @@
+<!-- Activity Tab - Unified Task Monitoring Panel -->
+<div
+    class="tab-pane fade tab-pane-full-height"
+    id="activity-tab-pane"
+    role="tabpanel"
+    aria-labelledby="activity-tab-btn"
+    tabindex="0"
+>
+    <div class="d-flex flex-column h-100 p-3">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4><i class="fas fa-tasks"></i> Activity Monitor</h4>
+            <small class="text-muted">
+                Real-time tracking of all background tasks
+            </small>
+        </div>
+
+        <!-- Task List Container -->
+        <div class="flex-grow-1 overflow-auto">
+            <div id="unified-task-list">
+                <!-- Task items will be dynamically populated here by task_monitor_ui.js -->
+                <div class="text-center text-muted p-4">
+                    <i class="fas fa-tasks fa-2x mb-2"></i>
+                    <p>No background tasks yet.</p>
+                    <small
+                        >Tasks from data ingestion and agent runs will appear
+                        here.</small
+                    >
+                </div>
+            </div>
+        </div>
+
+        <!-- Task Summary Footer -->
+        <div class="border-top pt-2 mt-2">
+            <small class="text-muted">
+                <i class="fas fa-info-circle"></i>
+                Tasks are automatically monitored and updated in real-time.
+                Completed tasks are kept for 24 hours before cleanup.
+            </small>
+        </div>
+    </div>
+</div>

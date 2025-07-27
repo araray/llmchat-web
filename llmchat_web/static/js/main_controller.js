@@ -6,6 +6,8 @@
  * This file initializes the application by dynamically loading external libraries,
  * fetching the initial server status, and then initializing all specialized UI modules.
  *
+ * UPDATED: Added TaskMonitor initialization as part of the unified task monitoring system.
+ *
  * Global state variables are declared in utils.js and populated here.
  */
 
@@ -49,6 +51,13 @@ async function loadDependenciesAndInitializeApp() {
     initializeTheme();
     fetchAndUpdateInitialStatus();
 
+    // --- UPDATED: Initialize TaskMonitor and add to init functions ---
+    // **Rationale Block**:
+    // Pre-state: TaskMonitor was loaded but not initialized in main_controller
+    // Limitation: Unified task monitoring service not started automatically
+    // Decision Path: Add TaskMonitor initialization to ensure centralized monitoring
+    // Post-state: TaskMonitor starts automatically and manages all background tasks
+
     // Initialize event listeners from all UI modules
     const initFunctions = [
       initThemeEventListeners,
@@ -61,15 +70,26 @@ async function loadDependenciesAndInitializeApp() {
       initPromptTemplateEventListeners,
       initIngestionEventListeners,
       initAgentEventListeners,
+      initTaskMonitorEventListeners, // NEW: Initialize unified task monitor
     ];
 
     initFunctions.forEach((initFunc) => {
       if (typeof initFunc === "function") {
         initFunc();
       } else {
-        console.warn(`MAIN_CTRL: A module's init function is not available.`);
+        console.warn(
+          `MAIN_CTRL: A module's init function is not available: ${initFunc?.name || "unknown"}`,
+        );
       }
     });
+
+    // Start the unified task monitoring service
+    if (typeof TaskMonitor !== "undefined" && TaskMonitor.startMonitoring) {
+      TaskMonitor.startMonitoring();
+      console.log("MAIN_CTRL: TaskMonitor service started successfully");
+    } else {
+      console.warn("MAIN_CTRL: TaskMonitor service not available");
+    }
   } catch (error) {
     console.error("FATAL: A critical library failed to load.", error);
     showToast(
@@ -209,5 +229,7 @@ $(document).ready(function () {
     appLogsModal.show();
   });
 
-  console.log("MAIN_CTRL: LLMChat Web UI core initialized.");
+  console.log(
+    "MAIN_CTRL: LLMChat Web UI core initialized with unified task monitoring.",
+  );
 });

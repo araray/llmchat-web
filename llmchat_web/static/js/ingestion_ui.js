@@ -1,14 +1,17 @@
 /**
  * @file ingestion_ui.js
  * @description Handles UI logic for the data ingestion modal, including form submissions
- * and task polling for file, directory (ZIP), and Git repository ingestion.
+ * and task delegation to the unified TaskMonitor service.
+ *
+ * REFACTORED: Now delegates task monitoring to TaskMonitor instead of local polling.
+ *
  * Depends on utils.js for helper functions (escapeHtml, showToast) and
  * rag_ui.js for fetchAndPopulateRagCollections.
  */
 
 /**
  * Handles the submission of ingestion forms using the new async task-based approach.
- * Uses fetch to submit the task and then polls for status updates.
+ * Uses fetch to submit the task and then delegates monitoring to TaskMonitor.
  * @param {string} ingestType - The type of ingestion ('file', 'dir_zip', 'git').
  * @param {FormData} formData - The form data to submit.
  */
@@ -23,9 +26,9 @@ async function handleIngestionFormSubmit(ingestType, formData) {
     .text("Submitting ingestion request...");
   $progressContainer.show();
   $progressBar
-    .css("width", "0%")
+    .css("width", "10%")
     .removeClass("bg-success bg-danger")
-    .attr("aria-valuenow", 0)
+    .attr("aria-valuenow", 10)
     .text("Starting...");
 
   try {
@@ -56,17 +59,107 @@ async function handleIngestionFormSubmit(ingestType, formData) {
 
     console.log(`INGEST_UI: Received task ID: ${taskId}`);
 
-    // Update UI to show task was submitted
-    $resultMsg.html(
-      `Task submitted successfully! <br><small>Task ID: ${escapeHtml(taskId)}</small><br>Monitoring progress...`,
-    );
-    $progressBar
-      .css("width", "10%")
-      .attr("aria-valuenow", 10)
-      .text("Task submitted...");
+    // Get collection name for task title
+    const collectionName =
+      formData.get("collection_name") || "Unknown Collection";
 
-    // Start polling for task status
-    await pollTaskStatus(taskId);
+    // Create descriptive task title based on ingestion type
+    let taskTitle;
+    switch (ingestType) {
+      case "file":
+        const fileCount = formData.getAll("files[]").length;
+        taskTitle = `File Ingestion: ${fileCount} file(s) → ${collectionName}`;
+        break;
+      case "dir_zip":
+        taskTitle = `ZIP Ingestion: Archive → ${collectionName}`;
+        break;
+      case "git":
+        const gitUrl = formData.get("git_url") || "";
+        const repoName =
+          gitUrl.split("/").pop()?.replace(".git", "") || "Git Repository";
+        taskTitle = `Git Ingestion: ${repoName} → ${collectionName}`;
+        break;
+      default:
+        taskTitle = `Data Ingestion → ${collectionName}`;
+    }
+
+    // --- REFACTORED: Delegate to TaskMonitor instead of local polling ---
+    // **Rationale Block**:
+    // Pre-state: Ingestion UI maintained its own polling loop via pollTaskStatus()
+    // Limitation: Duplicate polling logic across multiple UI modules, inefficient resource usage
+    // Decision Path: Centralize all task monitoring in TaskMonitor service for consistency
+    // Post-state: TaskMonitor handles all polling, ingestion UI shows confirmation and redirects user
+
+    if (typeof TaskMonitor !== "undefined" && TaskMonitor.addTask) {
+      TaskMonitor.addTask({
+        task_id: taskId,
+        title: taskTitle,
+        type: "Ingestion",
+        status: "submitted",
+        metadata: {
+          ingest_type: ingestType,
+          collection_name: collectionName,
+          source:
+            ingestType === "git"
+              ? formData.get("git_url")
+              : `${ingestType} upload`,
+        },
+      });
+
+      // Update UI to show task was submitted and redirect user
+      $progressBar
+        .css("width", "100%")
+        .addClass("bg-success")
+        .text("Submitted!");
+      $resultMsg.removeClass("text-muted text-danger").addClass("text-success")
+        .html(`
+          <strong>Task submitted successfully!</strong><br>
+          <small>Task ID: ${escapeHtml(taskId)}</small><br>
+          <em>Monitor progress in the Activity tab →</em>
+        `);
+
+      // Show toast notification
+      if (typeof showToast === "function") {
+        showToast(
+          "Ingestion Started",
+          `${taskTitle} - Monitor in Activity tab`,
+          "success",
+        );
+      }
+
+      // Auto-hide progress after a few seconds
+      setTimeout(() => {
+        $progressContainer.fadeOut();
+        // Close modal if still open
+        const modal = bootstrap.Modal.getInstance(
+          document.getElementById("ingestionModal"),
+        );
+        if (modal) {
+          modal.hide();
+        }
+      }, 3000);
+    } else {
+      // Fallback if TaskMonitor is not available - should not happen in normal operation
+      console.warn(
+        "INGEST_UI: TaskMonitor not available, falling back to basic confirmation",
+      );
+      $progressBar
+        .css("width", "100%")
+        .addClass("bg-warning")
+        .text("Submitted");
+      $resultMsg.removeClass("text-muted text-danger").addClass("text-warning")
+        .html(`
+          <strong>Task submitted!</strong><br>
+          <small>Task ID: ${escapeHtml(taskId)}</small><br>
+          <em>Status tracking not available - check manually</em>
+        `);
+    }
+
+    // Refresh RAG collections if available
+    if (typeof fetchAndPopulateRagCollections === "function") {
+      // Delay refresh to allow backend to process
+      setTimeout(fetchAndPopulateRagCollections, 2000);
+    }
   } catch (error) {
     console.error(`INGEST_UI: Ingestion error (Type: ${ingestType}):`, error);
     $progressBar.css("width", "100%").addClass("bg-danger").text("Failed!");
@@ -75,190 +168,6 @@ async function handleIngestionFormSubmit(ingestType, formData) {
       .addClass("text-danger")
       .html(
         `<strong>Error!</strong> Failed to submit ingestion task: ${escapeHtml(error.message)}`,
-      );
-    setTimeout(() => $progressContainer.fadeOut(), 3000);
-  }
-}
-
-/**
- * Polls the task status endpoint until the task is complete.
- * @param {string} taskId - The unique identifier of the task to monitor.
- */
-async function pollTaskStatus(taskId) {
-  const $resultMsg = $("#ingestion-result-message");
-  const $progressBar = $("#ingestion-progress-bar");
-  const $progressContainer = $("#ingestion-progress-container");
-
-  const maxPollAttempts = 120; // 10 minutes with 5-second intervals
-  let pollAttempts = 0;
-  let pollInterval;
-
-  try {
-    pollInterval = setInterval(async () => {
-      pollAttempts++;
-
-      try {
-        // Get task status
-        const statusResponse = await fetch(`/api/ingest/task/${taskId}/status`);
-
-        if (!statusResponse.ok) {
-          throw new Error(`Status check failed: ${statusResponse.status}`);
-        }
-
-        const statusData = await statusResponse.json();
-        const status = statusData.status;
-
-        console.log(`INGEST_UI: Task ${taskId} status: ${status}`);
-
-        // Update progress bar based on status
-        if (status === "queued") {
-          $progressBar
-            .css("width", "20%")
-            .attr("aria-valuenow", 20)
-            .text("Queued...");
-          $resultMsg.html(
-            `Task queued for processing...<br><small>Task ID: ${escapeHtml(taskId)}</small>`,
-          );
-        } else if (status === "in_progress") {
-          $progressBar
-            .css("width", "50%")
-            .attr("aria-valuenow", 50)
-            .text("Processing...");
-          $resultMsg.html(
-            `Ingestion in progress...<br><small>Task ID: ${escapeHtml(taskId)}</small>`,
-          );
-        } else if (status === "complete") {
-          // Task completed, get the result
-          clearInterval(pollInterval);
-          await getTaskResult(taskId);
-          return;
-        } else if (status === "failed") {
-          // Task failed
-          clearInterval(pollInterval);
-          $progressBar
-            .css("width", "100%")
-            .addClass("bg-danger")
-            .text("Failed!");
-          $resultMsg
-            .removeClass("text-muted text-success")
-            .addClass("text-danger")
-            .html(
-              `<strong>Task Failed!</strong><br>Task ID: ${escapeHtml(taskId)}`,
-            );
-          setTimeout(() => $progressContainer.fadeOut(), 3000);
-          return;
-        }
-
-        // Check if we've exceeded maximum poll attempts
-        if (pollAttempts >= maxPollAttempts) {
-          clearInterval(pollInterval);
-          $progressBar
-            .css("width", "100%")
-            .addClass("bg-warning")
-            .text("Timeout");
-          $resultMsg
-            .removeClass("text-muted text-success")
-            .addClass("text-warning")
-            .html(
-              `<strong>Polling timeout!</strong><br>Task may still be running.<br>Task ID: ${escapeHtml(taskId)}`,
-            );
-          setTimeout(() => $progressContainer.fadeOut(), 5000);
-        }
-      } catch (pollError) {
-        console.error(`INGEST_UI: Error polling task ${taskId}:`, pollError);
-
-        // Don't fail immediately on poll errors, retry a few times
-        if (pollAttempts >= 10) {
-          // Increased from 5 to 10 retries
-          clearInterval(pollInterval);
-          $progressBar
-            .css("width", "100%")
-            .addClass("bg-warning")
-            .text("Connection Error");
-          $resultMsg
-            .removeClass("text-muted text-success")
-            .addClass("text-warning")
-            .html(
-              `<strong>Connection error!</strong><br>Task may still be running.<br>Task ID: ${escapeHtml(taskId)}<br><small>You can manually check status later.</small>`,
-            );
-          setTimeout(() => $progressContainer.fadeOut(), 5000);
-        }
-      }
-    }, 5000); // Poll every 5 seconds
-  } catch (error) {
-    console.error(`INGEST_UI: Error starting task polling:`, error);
-    if (pollInterval) clearInterval(pollInterval);
-  }
-}
-
-/**
- * Retrieves and displays the final result of a completed task.
- * @param {string} taskId - The unique identifier of the completed task.
- */
-async function getTaskResult(taskId) {
-  const $resultMsg = $("#ingestion-result-message");
-  const $progressBar = $("#ingestion-progress-bar");
-  const $progressContainer = $("#ingestion-progress-container");
-
-  try {
-    const resultResponse = await fetch(`/api/ingest/task/${taskId}/result`);
-
-    if (!resultResponse.ok) {
-      throw new Error(`Result fetch failed: ${resultResponse.status}`);
-    }
-
-    const resultData = await resultResponse.json();
-    const result = resultData.result;
-
-    console.log(`INGEST_UI: Task ${taskId} result:`, result);
-
-    // Update UI based on result
-    $progressBar.css("width", "100%").attr("aria-valuenow", 100);
-
-    if (result.status === "success") {
-      $progressBar.addClass("bg-success").text("Complete!");
-      $resultMsg.removeClass("text-muted text-danger").addClass("text-success")
-        .html(`<strong>Success!</strong> ${escapeHtml(result.message) || "Ingestion completed."}<br>
-                     Total Files Submitted: ${result.total_files_submitted || "N/A"}<br>
-                     Files Processed Successfully: ${result.files_processed_successfully || "N/A"}<br>
-                     Files With Errors: ${result.files_with_errors || 0}<br>
-                     Total Chunks Added: ${result.total_chunks_added_to_db || 0}<br>
-                     Target Collection: ${escapeHtml(result.collection_name || "")}`);
-    } else {
-      $progressBar.addClass("bg-danger").text("Completed with Errors!");
-      let errorDetailsHtml = "";
-      if (result.error_messages && result.error_messages.length > 0) {
-        errorDetailsHtml = "<br>Details:<ul>";
-        result.error_messages.forEach((err) => {
-          errorDetailsHtml += `<li><small>${escapeHtml(err)}</small></li>`;
-        });
-        errorDetailsHtml += "</ul>";
-      }
-      $resultMsg.removeClass("text-muted text-success").addClass("text-danger")
-        .html(`<strong>Ingestion Completed with Errors!</strong> ${escapeHtml(result.message) || ""}<br>
-                     Total Files Submitted: ${result.total_files_submitted || "N/A"}<br>
-                     Files With Errors: ${result.files_with_errors || "N/A"}<br>
-                     Total Chunks Added: ${result.total_chunks_added_to_db || 0}
-                     ${errorDetailsHtml}`);
-    }
-
-    // Refresh RAG collections if available
-    if (typeof fetchAndPopulateRagCollections === "function") {
-      fetchAndPopulateRagCollections();
-    }
-
-    setTimeout(() => $progressContainer.fadeOut(), 5000);
-  } catch (error) {
-    console.error(`INGEST_UI: Error getting task result for ${taskId}:`, error);
-    $progressBar
-      .css("width", "100%")
-      .addClass("bg-warning")
-      .text("Result Error");
-    $resultMsg
-      .removeClass("text-muted text-success")
-      .addClass("text-warning")
-      .html(
-        `<strong>Completed but couldn't retrieve details!</strong><br>Task ID: ${escapeHtml(taskId)}`,
       );
     setTimeout(() => $progressContainer.fadeOut(), 5000);
   }
@@ -354,6 +263,6 @@ function initIngestionEventListeners() {
   });
 
   console.log(
-    "Ingestion UI event listeners initialized with async task polling.",
+    "INGEST_UI: Ingestion UI event listeners initialized with TaskMonitor delegation.",
   );
 }

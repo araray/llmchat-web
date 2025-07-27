@@ -31,6 +31,20 @@
     <li class="nav-item" role="presentation">
         <button
             class="nav-link"
+            id="activity-tab-btn"
+            data-bs-toggle="tab"
+            data-bs-target="#activity-tab-pane"
+            type="button"
+            role="tab"
+            aria-controls="activity-tab-pane"
+            aria-selected="false"
+        >
+            <i class="fas fa-tasks"></i> Activity
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button
+            class="nav-link"
             id="context-manager-tab-btn"
             data-bs-toggle="tab"
             data-bs-target="#context-manager-tab-pane"
@@ -77,6 +91,7 @@
     <!-- Each tab pane is now included from its own partial file -->
     {% include 'partials/tabs/_chat_tab.html' %} {% include
     'partials/tabs/_agents_tab.html' %} {% include
+    'partials/tabs/_activity_tab.html' %} {% include
     'partials/tabs/_context_manager_tab.html' %} {% include
     'partials/tabs/_prompts_tab.html' %} {% include
     'partials/tabs/_rag_tab.html' %}

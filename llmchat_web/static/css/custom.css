@@ -52,6 +52,7 @@
 @import url("components/_rag.css");
 @import url("components/_settings.css");
 @import url("components/_agents.css");
+@import url("components/_task_monitor.css");
 @import url("components/_markdown.css");
 @import url("components/_modals.css");
 @import url("components/_utilities.css");
