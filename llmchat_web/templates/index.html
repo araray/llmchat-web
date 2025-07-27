@@ -180,7 +180,7 @@ block head_extra %}
                     </div>
                 </div>
             </div>
-            <!-- START: New Agents Tab Pane -->
+            <!-- START: Enhanced Agents Tab Pane -->
             <div
                 class="tab-pane fade tab-pane-full-height"
                 id="agents-tab-pane"
@@ -191,105 +191,85 @@ block head_extra %}
                 <div class="row h-100">
                     <!-- Left Column: Goal Input and Task List -->
                     <div class="col-md-6 d-flex flex-column h-100">
-                        <h5><i class="fas fa-bullseye"></i> Agent Goal</h5>
-                        <form id="agent-goal-form" class="mb-3">
-                            <div class="mb-2">
-                                <label
-                                    for="agent-goal-input"
-                                    class="form-label"
-                                >
-                                    High-level Goal:
-                                </label>
-                                <textarea
-                                    class="form-control"
-                                    id="agent-goal-input"
-                                    rows="3"
-                                    placeholder="Describe what you want the agent to accomplish... e.g., 'Research the pros and cons of FastAPI vs Flask and write a summary'"
-                                    required
-                                ></textarea>
-                            </div>
-                            <div class="row mb-2">
-                                <div class="col-md-6">
+                        <div class="mb-3">
+                            <h5><i class="fas fa-bullseye"></i> Agent Goal</h5>
+                            <form id="agent-goal-form">
+                                <div class="mb-2">
                                     <label
-                                        for="agent-provider-select"
-                                        class="form-label form-label-sm"
+                                        for="agent-goal-input"
+                                        class="form-label"
                                     >
-                                        Provider Override (Optional):
+                                        High-level Goal:
                                     </label>
-                                    <select
-                                        class="form-select form-select-sm"
-                                        id="agent-provider-select"
-                                    >
-                                        <option value="">
-                                            Use Session Default
-                                        </option>
-                                        <!-- Options populated by JS -->
-                                    </select>
+                                    <textarea
+                                        class="form-control"
+                                        id="agent-goal-input"
+                                        rows="3"
+                                        placeholder="Describe what you want the agent to accomplish... e.g., 'Research the pros and cons of FastAPI vs Flask and write a summary'"
+                                        required
+                                    ></textarea>
                                 </div>
-                                <div class="col-md-6">
-                                    <label
-                                        for="agent-model-select"
-                                        class="form-label form-label-sm"
-                                    >
-                                        Model Override (Optional):
-                                    </label>
-                                    <select
-                                        class="form-select form-select-sm"
-                                        id="agent-model-select"
-                                    >
-                                        <option value="">
-                                            Use Session Default
-                                        </option>
-                                        <!-- Options populated by JS -->
-                                    </select>
+                                <div class="row mb-2">
+                                    <div class="col-md-6">
+                                        <label
+                                            for="agent-provider-select"
+                                            class="form-label form-label-sm"
+                                        >
+                                            Provider Override (Optional):
+                                        </label>
+                                        <select
+                                            class="form-select form-select-sm"
+                                            id="agent-provider-select"
+                                        >
+                                            <option value="">
+                                                Use Session Default
+                                            </option>
+                                            <!-- Options populated by JS -->
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label
+                                            for="agent-model-select"
+                                            class="form-label form-label-sm"
+                                        >
+                                            Model Override (Optional):
+                                        </label>
+                                        <select
+                                            class="form-select form-select-sm"
+                                            id="agent-model-select"
+                                        >
+                                            <option value="">
+                                                Use Session Default
+                                            </option>
+                                            <!-- Options populated by JS -->
+                                        </select>
+                                    </div>
                                 </div>
-                            </div>
-                            <button type="submit" class="btn btn-primary">
-                                <i class="fas fa-rocket"></i> Launch Agent
-                            </button>
-                        </form>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-rocket"></i> Launch Agent
+                                </button>
+                            </form>
+                        </div>
 
                         <hr class="my-3" />
 
-                        <h5><i class="fas fa-tasks"></i> Agent Tasks</h5>
-                        <div
-                            id="agent-task-list"
-                            class="flex-grow-1 overflow-auto"
-                        >
-                            <p class="text-muted small p-2">
-                                No agent tasks yet. Submit a goal above to get
-                                started.
-                            </p>
+                        <div class="d-flex flex-column flex-grow-1">
+                            <h5><i class="fas fa-tasks"></i> Agent Tasks</h5>
+                            <div
+                                id="agent-task-list"
+                                class="flex-grow-1 overflow-auto"
+                            >
+                                <p class="text-muted small p-2">
+                                    No agent tasks yet. Submit a goal above to
+                                    get started.
+                                </p>
+                            </div>
                         </div>
                     </div>
 
                     <!-- Right Column: Task Detail View -->
                     <div class="col-md-6 d-flex flex-column h-100">
-                        <div
-                            id="agent-task-detail-view"
-                            style="display: none"
-                            class="d-flex flex-column h-100"
-                        >
-                            <div id="agent-detail-header" class="mb-3">
-                                <!-- Task details header populated by JS -->
-                            </div>
-
-                            <div
-                                id="agent-stream-container"
-                                class="flex-grow-1 overflow-auto mb-3"
-                            >
-                                <!-- Real-time agent progress stream -->
-                            </div>
-
-                            <div
-                                id="agent-result-container"
-                                style="display: none"
-                                class="mt-auto"
-                            >
-                                <!-- Final result display -->
-                            </div>
-                        </div>
-
+                        <!-- Welcome Pane (shown by default) -->
                         <div
                             id="agent-welcome-pane"
                             class="text-center p-5 h-100 d-flex flex-column justify-content-center align-items-center"
@@ -308,10 +288,37 @@ block head_extra %}
                                 progress and results.
                             </p>
                         </div>
+
+                        <!-- Task Detail View (hidden by default) -->
+                        <div
+                            id="agent-task-detail-view"
+                            style="display: none"
+                            class="d-flex flex-column h-100"
+                        >
+                            <div id="agent-detail-header" class="mb-3">
+                                <!-- Task details header populated by JS -->
+                            </div>
+
+                            <div
+                                id="agent-stream-container"
+                                class="flex-grow-1 overflow-auto mb-3"
+                                style="min-height: 200px"
+                            >
+                                <!-- Real-time agent progress stream -->
+                            </div>
+
+                            <div
+                                id="agent-result-container"
+                                style="display: none"
+                                class="border rounded p-2 bg-dark"
+                            >
+                                <!-- Final result display -->
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
-            <!-- END: New Agents Tab Pane -->
+            <!-- END: Enhanced Agents Tab Pane -->
             <div
                 class="tab-pane fade tab-pane-full-height"
                 id="context-manager-tab-pane"

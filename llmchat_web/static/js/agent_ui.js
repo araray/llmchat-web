@@ -71,7 +71,9 @@ async function handleAgentGoalSubmit() {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new Error(
-        errorData.detail || `HTTP ${response.status}: ${response.statusText}`,
+        errorData.detail ||
+          errorData.error ||
+          `HTTP ${response.status}: ${response.statusText}`,
       );
     }
 
@@ -115,45 +117,6 @@ async function handleAgentGoalSubmit() {
     // Automatically select this task for detailed view
     selectTaskForDetailView(taskId);
   } catch (error) {
-    console.error("AGENT_UI: Error fetching provider options:", error);
-  }
-}
-
-/**
- * Initializes all event listeners and UI components for the agent interface.
- * This function should be called from main_controller.js.
- */
-function initAgentEventListeners() {
-  console.log("AGENT_UI: Initializing agent UI event listeners...");
-
-  // Goal submission form
-  const goalForm = document.getElementById("agent-goal-form");
-  if (goalForm) {
-    goalForm.addEventListener("submit", function (e) {
-      e.preventDefault();
-      handleAgentGoalSubmit();
-    });
-  }
-
-  // Task list click handling (using event delegation)
-  const taskList = document.getElementById("agent-task-list");
-  if (taskList) {
-    taskList.addEventListener("click", function (e) {
-      const taskItem = e.target.closest(".agent-task-item");
-      if (taskItem) {
-        const taskId = taskItem.dataset.taskId;
-        selectTaskForDetailView(taskId);
-      }
-    });
-  }
-
-  // Initialize provider/model options
-  fetchProviderAndModelOptions();
-
-  console.log("AGENT_UI: Agent UI event listeners initialized successfully.");
-}
-
-console.log("AGENT_UI: Agent UI module loaded.");
     console.error("AGENT_UI: Error submitting agent goal:", error);
     showToast(
       "Error",
@@ -306,16 +269,16 @@ function streamAgentProgress(taskId) {
 
           // Look for memory operation indicators in the thought
           const memoryKeywords = [
-            'searching my knowledge',
-            'recalling our last conversation',
-            'looking for information',
-            'checking my memory',
-            'retrieving from knowledge base',
-            'searching for'
+            "searching my knowledge",
+            "recalling our last conversation",
+            "looking for information",
+            "checking my memory",
+            "retrieving from knowledge base",
+            "searching for",
           ];
 
-          const hasMemoryOperation = memoryKeywords.some(keyword =>
-            thoughtContent.toLowerCase().includes(keyword)
+          const hasMemoryOperation = memoryKeywords.some((keyword) =>
+            thoughtContent.toLowerCase().includes(keyword),
           );
 
           if (hasMemoryOperation) {
@@ -332,14 +295,25 @@ function streamAgentProgress(taskId) {
           break;
 
         case "action":
-          const toolName = data.tool_name || (data.action ? data.action.name : '');
+          const toolName =
+            data.tool_name || (data.action ? data.action.name : "");
           let actionContent = `Tool: ${toolName}, Arguments: ${JSON.stringify(data.action ? data.action.arguments : data.arguments || {})}`;
           let isMemoryAction = false;
 
           // Check if this is a memory search action
-          if (toolName === 'semantic_search' || toolName === 'episodic_search') {
-            const memoryType = toolName === 'semantic_search' ? 'Semantic Memory' : 'Episodic Memory';
-            const query = data.action ? data.action.arguments.query : (data.arguments ? data.arguments.query : 'unknown query');
+          if (
+            toolName === "semantic_search" ||
+            toolName === "episodic_search"
+          ) {
+            const memoryType =
+              toolName === "semantic_search"
+                ? "Semantic Memory"
+                : "Episodic Memory";
+            const query = data.action
+              ? data.action.arguments.query
+              : data.arguments
+                ? data.arguments.query
+                : "unknown query";
 
             // Create a special visual element for the memory search action
             actionContent = `
@@ -355,7 +329,7 @@ function streamAgentProgress(taskId) {
           lastAction = {
             tool_name: toolName,
             is_memory: isMemoryAction,
-            data: data
+            data: data,
           };
 
           appendStreamEvent(stepsContainer, {
@@ -377,14 +351,24 @@ function streamAgentProgress(taskId) {
               // Try to parse the observation as memory search results
               const documents = JSON.parse(data.content || data.observation);
               if (Array.isArray(documents)) {
-                observationContent = renderRetrievedDocs(documents, lastAction.tool_name);
+                observationContent = renderRetrievedDocs(
+                  documents,
+                  lastAction.tool_name,
+                );
                 isMemoryObservation = true;
               }
             } catch (e) {
               // If parsing fails, check if it's a text-based memory result
               const obsText = data.content || data.observation;
-              if (obsText.includes('search results') || obsText.includes('Retrieved') || obsText.includes('Found')) {
-                observationContent = renderTextMemoryResult(obsText, lastAction.tool_name);
+              if (
+                obsText.includes("search results") ||
+                obsText.includes("Retrieved") ||
+                obsText.includes("Found")
+              ) {
+                observationContent = renderTextMemoryResult(
+                  obsText,
+                  lastAction.tool_name,
+                );
                 isMemoryObservation = true;
               } else {
                 // Fallback for unparseable memory results
@@ -484,24 +468,29 @@ function renderRetrievedDocs(documents, toolName) {
   }
 
   const collapseId = `collapse-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  const memoryType = toolName === 'semantic_search' ? 'Semantic Memory' : 'Episodic Memory';
+  const memoryType =
+    toolName === "semantic_search" ? "Semantic Memory" : "Episodic Memory";
 
-  let itemsHtml = documents.map((doc, index) => {
-    const score = doc.score ? `(Relevance: ${doc.score.toFixed(3)})` : '';
-    const metadata = doc.metadata ? `Source: ${escapeHtml(JSON.stringify(doc.metadata))}` : '';
+  let itemsHtml = documents
+    .map((doc, index) => {
+      const score = doc.score ? `(Relevance: ${doc.score.toFixed(3)})` : "";
+      const metadata = doc.metadata
+        ? `Source: ${escapeHtml(JSON.stringify(doc.metadata))}`
+        : "";
 
-    return `
+      return `
       <div class="retrieved-doc-item">
         <div class="retrieved-doc-header">
           <strong>Result ${index + 1} ${score}</strong>
-          ${metadata ? `<small class="text-muted d-block">${metadata}</small>` : ''}
+          ${metadata ? `<small class="text-muted d-block">${metadata}</small>` : ""}
         </div>
         <div class="retrieved-doc-content">
           ${escapeHtml(doc.content || doc.text || JSON.stringify(doc))}
         </div>
       </div>
     `;
-  }).join('');
+    })
+    .join("");
 
   return `
     <div class="retrieved-docs-container">
@@ -530,7 +519,8 @@ function renderRetrievedDocs(documents, toolName) {
  * @returns {string} The generated HTML string.
  */
 function renderTextMemoryResult(resultText, toolName) {
-  const memoryType = toolName === 'semantic_search' ? 'Semantic Memory' : 'Episodic Memory';
+  const memoryType =
+    toolName === "semantic_search" ? "Semantic Memory" : "Episodic Memory";
   const collapseId = `text-collapse-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
   return `
@@ -585,7 +575,9 @@ function appendStreamEvent(container, event) {
       if (event.isHtml) {
         contentHtml = `<div class="agent-action">${event.content}</div>`;
       } else {
-        const toolDisplay = event.tool_name ? ` (${escapeHtml(event.tool_name)})` : "";
+        const toolDisplay = event.tool_name
+          ? ` (${escapeHtml(event.tool_name)})`
+          : "";
         contentHtml = `<div class="agent-action"><strong>Tool${toolDisplay}:</strong> ${escapeHtml(event.content)}</div>`;
       }
       break;
@@ -775,6 +767,7 @@ function selectTaskForDetailView(taskId) {
 
   // Show detail view and populate header
   const detailView = document.getElementById("agent-task-detail-view");
+  const welcomePane = document.getElementById("agent-welcome-pane");
   const detailHeader = document.getElementById("agent-detail-header");
 
   detailHeader.innerHTML = `
@@ -787,7 +780,8 @@ function selectTaskForDetailView(taskId) {
         </div>
     `;
 
-  // Show the detail view
+  // Hide welcome pane and show detail view
+  if (welcomePane) welcomePane.style.display = "none";
   detailView.style.display = "block";
 
   // Start streaming if task is running, or fetch result if complete
@@ -853,3 +847,42 @@ async function fetchProviderAndModelOptions() {
       });
     }
   } catch (error) {
+    console.error("AGENT_UI: Error fetching provider options:", error);
+  }
+}
+
+/**
+ * Initializes all event listeners and UI components for the agent interface.
+ * This function should be called from main_controller.js.
+ */
+function initAgentEventListeners() {
+  console.log("AGENT_UI: Initializing agent UI event listeners...");
+
+  // Goal submission form
+  const goalForm = document.getElementById("agent-goal-form");
+  if (goalForm) {
+    goalForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      handleAgentGoalSubmit();
+    });
+  }
+
+  // Task list click handling (using event delegation)
+  const taskList = document.getElementById("agent-task-list");
+  if (taskList) {
+    taskList.addEventListener("click", function (e) {
+      const taskItem = e.target.closest(".agent-task-item");
+      if (taskItem) {
+        const taskId = taskItem.dataset.taskId;
+        selectTaskForDetailView(taskId);
+      }
+    });
+  }
+
+  // Initialize provider/model options
+  fetchProviderAndModelOptions();
+
+  console.log("AGENT_UI: Agent UI event listeners initialized successfully.");
+}
+
+console.log("AGENT_UI: Agent UI module loaded.");
