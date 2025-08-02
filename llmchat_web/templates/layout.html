@@ -14,35 +14,21 @@
             href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
             rel="stylesheet"
         />
-        <!-- <link
-            href="https://cdn.jsdelivr.net/npm/fastbootstrap@2.2.0/dist/css/fastbootstrap.min.css"
-            rel="stylesheet"
-            integrity="sha256-V6lu+OdYNKTKTsVFBuQsyIlDiRWiOmtC8VQ8Lzdm2i4="
-            crossorigin="anonymous"
-        /> -->
-        <!-- <link
-            rel="stylesheet"
-            href="{{ url_for('static', filename='css/bootstrap.min.css') }}"
-        /> -->
         <link
             rel="stylesheet"
             href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
         />
-        <!-- The main stylesheet now has an ID for JS targeting. -->
         <link
             id="main-theme-stylesheet"
             rel="stylesheet"
             href="{{ url_for('static', filename='css/custom.css') }}"
         />
-        <!-- This link will be dynamically updated by JavaScript to load the selected theme override file. -->
         <link id="theme-override-stylesheet" rel="stylesheet" href="" />
         {% block head_extra %}
-        <!-- START: Rich Content Rendering Dependencies -->
         <link
             rel="stylesheet"
             href="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/paraiso-dark.css"
         />
-        <!-- END: Rich Content Rendering Dependencies -->
         {% endblock %}
     </head>
     <body class="d-flex flex-column h-100">
@@ -55,26 +41,48 @@
         <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 
         {% block scripts_extra %}
-        <!--
-            The external rendering library scripts have been REMOVED from here.
-            They will now be loaded dynamically and in a controlled order by main_controller.js
-            to definitively prevent race condition errors.
-        -->
+        <!-- External libraries are loaded dynamically by main_controller.js -->
         {% endblock %}
 
         <!-- Application Scripts -->
         <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
         <script src="{{ url_for('static', filename='js/session_api.js') }}"></script>
+
+        <!-- START: Refactored Main Controller Scripts -->
+        <script src="{{ url_for('static', filename='js/theme_manager.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/session_ui.js') }}"></script>
+        <!-- END: Refactored Main Controller Scripts -->
+
         <script src="{{ url_for('static', filename='js/rag_ui.js') }}"></script>
         <script src="{{ url_for('static', filename='js/llm_settings_ui.js') }}"></script>
+
+        <!-- START: Refactored Prompt Manager Scripts -->
+        <script src="{{ url_for('static', filename='js/prompt_shortcuts_ui.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/prompt_editor_ui.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/prompt_list_ui.js') }}"></script>
         <script src="{{ url_for('static', filename='js/prompt_manager_ui.js') }}"></script>
+        <!-- END: Refactored Prompt Manager Scripts -->
+
         <script src="{{ url_for('static', filename='js/prompt_template_ui.js') }}"></script>
         <script src="{{ url_for('static', filename='js/ingestion_ui.js') }}"></script>
-        <!-- NEW: Agent UI module loaded before chat_ui.js -->
+
+        <!-- START: Refactored Agent Scripts -->
+        <script src="{{ url_for('static', filename='js/agent_api.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/agent_stream.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/agent_tasks.js') }}"></script>
         <script src="{{ url_for('static', filename='js/agent_ui.js') }}"></script>
-        <!-- chat_ui.js must come before main_controller.js -->
+        <!-- END: Refactored Agent Scripts -->
+
         <script src="{{ url_for('static', filename='js/chat_ui.js') }}"></script>
+
+        <!-- START: Refactored Context Manager Scripts -->
+        <script src="{{ url_for('static', filename='js/context_preview_ui.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/context_workbench_ui.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/context_workspace_ui.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/context_history_ui.js') }}"></script>
         <script src="{{ url_for('static', filename='js/context_manager_ui.js') }}"></script>
+        <!-- END: Refactored Context Manager Scripts -->
+
         <!-- Main controller/initializer, loaded last. -->
         <script src="{{ url_for('static', filename='js/main_controller.js') }}"></script>
     </body>

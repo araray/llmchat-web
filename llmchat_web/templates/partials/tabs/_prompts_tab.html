@@ -1,0 +1,129 @@
+<div
+    class="tab-pane fade tab-pane-full-height"
+    id="prompts-tab-pane"
+    role="tabpanel"
+    aria-labelledby="prompts-tab-btn"
+    tabindex="0"
+>
+    <div class="row h-100">
+        <!-- Left Column: Preset List -->
+        <div class="col-md-4 d-flex flex-column h-100">
+            <h5><i class="fas fa-list-ul"></i> Saved Presets</h5>
+            <div class="input-group input-group-sm mb-2">
+                <span class="input-group-text" id="basic-addon1"
+                    ><i class="fas fa-search"></i
+                ></span>
+                <input
+                    type="text"
+                    class="form-control"
+                    id="prompt-preset-search-input"
+                    placeholder="Search presets..."
+                />
+            </div>
+            <div
+                id="prompt-preset-list"
+                class="list-group flex-grow-1 overflow-auto mb-2"
+            >
+                <!-- Preset list will be populated by JS -->
+                <p class="text-muted small p-2">Loading presets...</p>
+            </div>
+            <button class="btn btn-primary btn-sm" id="btn-new-prompt-preset">
+                <i class="fas fa-plus-circle"></i> New Preset
+            </button>
+        </div>
+
+        <!-- Right Column: Preset Editor -->
+        <div class="col-md-8 d-flex flex-column h-100">
+            <div id="prompt-preset-editor-pane" class="d-none">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5><i class="fas fa-edit"></i> Preset Editor</h5>
+                    <div>
+                        <button
+                            class="btn btn-success btn-sm"
+                            id="btn-save-prompt-preset"
+                        >
+                            <i class="fas fa-save"></i> Save
+                        </button>
+                        <button
+                            class="btn btn-danger btn-sm"
+                            id="btn-delete-prompt-preset"
+                        >
+                            <i class="fas fa-trash-alt"></i> Delete
+                        </button>
+                    </div>
+                </div>
+                <hr class="mt-2 mb-3" />
+                <form id="form-prompt-preset-editor">
+                    <input
+                        type="hidden"
+                        id="prompt-preset-editor-original-name"
+                    />
+                    <div class="mb-3">
+                        <label for="prompt-preset-name" class="form-label"
+                            >Preset Name</label
+                        >
+                        <input
+                            type="text"
+                            class="form-control"
+                            id="prompt-preset-name"
+                            required
+                        />
+                    </div>
+                    <div class="mb-3">
+                        <label
+                            for="prompt-preset-description"
+                            class="form-label"
+                            >Description (Optional)</label
+                        >
+                        <textarea
+                            class="form-control"
+                            id="prompt-preset-description"
+                            rows="2"
+                        ></textarea>
+                    </div>
+
+                    <h6><i class="fas fa-cubes"></i> Preset Items</h6>
+                    <div
+                        id="prompt-preset-items-list"
+                        class="border rounded p-2 mb-2"
+                        style="
+                            min-height: 150px;
+                            max-height: 250px;
+                            overflow-y: auto;
+                        "
+                    >
+                        <!-- Preset items will be populated by JS -->
+                    </div>
+                    <button
+                        type="button"
+                        class="btn btn-outline-secondary btn-sm mb-3"
+                        id="btn-add-preset-item"
+                    >
+                        <i class="fas fa-plus"></i> Add Item
+                    </button>
+
+                    <h6>
+                        <i class="fas fa-key"></i> Template Values
+                        (Placeholders)
+                    </h6>
+                    <p class="small text-muted">
+                        Define key-value pairs (e.g., `language: Python`) for
+                        this preset.
+                    </p>
+                    <div id="prompt-preset-template-values-container">
+                        <!-- Template values UI will be inserted here by JS, similar to settings tab -->
+                    </div>
+                </form>
+            </div>
+            <div
+                id="prompt-preset-welcome-pane"
+                class="text-center p-5 h-100 d-flex flex-column justify-content-center align-items-center"
+            >
+                <i class="fas fa-star fa-3x text-muted mb-3"></i>
+                <h5 class="text-muted">
+                    Select a preset to view or edit, or create a new one.
+                </h5>
+            </div>
+        </div>
+    </div>
+</div>

@@ -3,9 +3,13 @@
 Flask routes for workspace and context management in the llmchat-web application.
 Handles operations on session-specific workspace items (context pool)
 and context preview functionalities.
+
+REFACTORED: All operations now use the LLMCoreAPIClient service instead of
+direct llmcore library imports. This completes the architectural decoupling
+required by Phase 1 of the service-oriented architecture transition.
 """
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from flask import jsonify, request
 from flask import session as flask_session
@@ -13,46 +17,26 @@ from flask import session as flask_session
 # Import the specific blueprint defined in the routes package's __init__.py
 from . import workspace_bp
 
-# Rationale: The direct import of 'llmcore_instance' is removed from the top
-# level to break a circular dependency with the main 'app.py' module.
-# It will be imported locally within each route function that needs it.
+# --- Rationale Block: API-Driven Architecture Transition ---
+# Pre-state: Routes directly imported and used llmcore_instance, LLMCore exceptions,
+#            and models. Complex logic for resolving staged items and enriching
+#            responses was handled in the web layer.
+# Limitation: Tight coupling prevented independent deployment and scaling, violated
+#             service-oriented architecture principles, and required full llmcore
+#             library dependency in the web service.
+# Decision Path: Replace all direct llmcore interactions with HTTP API calls via
+#                LLMCoreAPIClient. Move complex business logic (staged item resolution,
+#                context enrichment) to the llmcore service where it belongs.
+# Post-state: Routes act as pure API proxies, enabling true service decoupling
+#             and completing Phase 1 architectural goals.
+
 from ..app import (
     async_to_sync_in_flask,
     logger as app_logger,  # Main app logger
 )
 
-# Import specific LLMCore exceptions and models relevant to workspace/context
-from llmcore import (
-    ContextItem as LLMCoreContextItem,  # Used for adding/retrieving workspace items
-    ContextItemType as LLMCoreContextItemType,  # For specifying item types
-    LLMCoreError,
-    Role as LLMCoreRole,  # Needed for add_message_to_workspace_route
-    SessionNotFoundError,
-    StorageError,
-)
-
-# Import helper from chat_routes for resolving staged items, used in context preview
-# This creates a dependency, which is acceptable for now.
-# If this helper becomes more widely used, it could be moved to a shared routes.utils module.
-try:
-    from .chat_routes import _resolve_staged_items_for_core
-except ImportError:
-    # Fallback or error handling if chat_routes isn't available during standalone testing/linting
-    # For runtime, this import should work.
-    logger_ws_init = logging.getLogger("llmchat_web.routes.workspace_init")
-    logger_ws_init.warning(
-        "_resolve_staged_items_for_core could not be imported from .chat_routes. "
-        "Context preview functionality might be affected if this persists at runtime."
-    )
-
-    # Define a dummy function to prevent NameError if import fails,
-    # though this means preview will not work correctly.
-    async def _resolve_staged_items_for_core(
-        staged_items_from_js: List[Dict[str, Any]], session_id_for_staging: Any
-    ) -> List[Union[Any, Any]]:  # Use generic Any here for the dummy
-        logger_ws_init.error("Dummy _resolve_staged_items_for_core called due to import error!")
-        return []
-
+# Replace llmcore direct imports with API client
+from ..services.llmcore_api_client import get_api_client
 
 # Configure a local logger for this specific routes module
 logger = logging.getLogger("llmchat_web.routes.workspace")
@@ -75,27 +59,25 @@ async def list_workspace_items_route(session_id: str) -> Any:
     """
     Lists all workspace items (LLMCore ContextItems) for a given session.
     """
-    # FIX: Import locally to prevent circular dependency on startup.
-    from ..app import llmcore_instance
+    api_client = get_api_client()
 
-    if not llmcore_instance:
-        logger.error(f"Attempted to list workspace items for session {session_id}, but LLM service is not available.")
-        return jsonify({"error": "LLM service not available."}), 503
     try:
         logger.debug(f"Listing workspace items for session: {session_id}")
-        items = await llmcore_instance.get_session_context_items(session_id)
-        item_list_json = [item.model_dump(mode="json") for item in items]
-        logger.info(f"Successfully listed {len(item_list_json)} workspace items for session {session_id}.")
-        return jsonify(item_list_json)
-    except SessionNotFoundError:
-        logger.warning(f"Session {session_id} not found when listing workspace items.")
-        return jsonify({"error": "Session not found."}), 404
-    except LLMCoreError as e:
+        items = await api_client.list_workspace_items(session_id)
+        logger.info(f"Successfully listed {len(items)} workspace items for session {session_id}.")
+        return jsonify(items)
+    except Exception as e:
+        # Handle different HTTP status codes from the API
+        if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+            if e.response.status_code == 404:
+                logger.warning(f"Session {session_id} not found when listing workspace items.")
+                return jsonify({"error": "Session not found."}), 404
+            elif e.response.status_code == 503:
+                logger.error(f"LLMCore service unavailable when listing workspace items for session {session_id}.")
+                return jsonify({"error": "LLM service not available."}), 503
+
         logger.error(f"Error listing workspace items for session {session_id}: {e}", exc_info=True)
-        return jsonify({"error": f"Failed to list workspace items: {str(e)}"}), 500
-    except Exception as e_unexp:
-        logger.error(f"Unexpected error listing workspace items for session {session_id}: {e_unexp}", exc_info=True)
-        return jsonify({"error": "An unexpected server error occurred."}), 500
+        return jsonify({"error": "Failed to list workspace items."}), 500
 
 
 @workspace_bp.route("/<session_id>/workspace/items/<item_id>", methods=["GET"])
@@ -104,30 +86,26 @@ async def get_workspace_item_route(session_id: str, item_id: str) -> Any:
     """
     Retrieves a specific workspace item by its ID from a given session.
     """
-    # FIX: Import locally to prevent circular dependency on startup.
-    from ..app import llmcore_instance
+    api_client = get_api_client()
 
-    if not llmcore_instance:
-        logger.error(f"Attempted to get workspace item {item_id} for session {session_id}, but LLM service is not available.")
-        return jsonify({"error": "LLM service not available."}), 503
     try:
         logger.debug(f"Getting workspace item '{item_id}' for session: {session_id}")
-        item = await llmcore_instance.get_context_item(session_id, item_id)
-        if item:
-            logger.info(f"Successfully retrieved workspace item '{item_id}' for session {session_id}.")
-            return jsonify(item.model_dump(mode="json"))
-        else:
-            logger.warning(f"Workspace item '{item_id}' not found in session {session_id}.")
-            return jsonify({"error": "Workspace item not found."}), 404
-    except SessionNotFoundError:
-        logger.warning(f"Session {session_id} not found when getting workspace item '{item_id}'.")
-        return jsonify({"error": "Session not found."}), 404
-    except LLMCoreError as e:
+        item = await api_client.get_workspace_item(session_id, item_id)
+        logger.info(f"Successfully retrieved workspace item '{item_id}' for session {session_id}.")
+        return jsonify(item)
+    except Exception as e:
+        # Handle different HTTP status codes from the API
+        if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+            if e.response.status_code == 404:
+                # Could be session not found or item not found
+                logger.warning(f"Session {session_id} or workspace item '{item_id}' not found.")
+                return jsonify({"error": "Session or workspace item not found."}), 404
+            elif e.response.status_code == 503:
+                logger.error(f"LLMCore service unavailable when getting workspace item {item_id} for session {session_id}.")
+                return jsonify({"error": "LLM service not available."}), 503
+
         logger.error(f"Error getting workspace item {item_id} for session {session_id}: {e}", exc_info=True)
-        return jsonify({"error": f"Failed to get workspace item: {str(e)}"}), 500
-    except Exception as e_unexp:
-        logger.error(f"Unexpected error getting workspace item {item_id} for session {session_id}: {e_unexp}", exc_info=True)
-        return jsonify({"error": "An unexpected server error occurred."}), 500
+        return jsonify({"error": "Failed to get workspace item."}), 500
 
 
 @workspace_bp.route("/<session_id>/workspace/add_text", methods=["POST"])
@@ -137,39 +115,30 @@ async def add_text_to_workspace_route(session_id: str) -> Any:
     Adds a text snippet as a new workspace item to the specified session.
     Expects JSON payload: {"content": "your text", "item_id": "optional_custom_id"}
     """
-    # FIX: Import locally to prevent circular dependency on startup.
-    from ..app import llmcore_instance
-
-    if not llmcore_instance:
-        logger.error(f"Attempted to add text to workspace for session {session_id}, but LLM service is not available.")
-        return jsonify({"error": "LLM service not available."}), 503
+    api_client = get_api_client()
 
     data = request.json
     if not data or "content" not in data:
         logger.warning(f"Add text to workspace for session {session_id} called without 'content' in payload.")
         return jsonify({"error": "Missing 'content' in request payload."}), 400
 
-    content: str = data["content"]
-    item_id: Optional[str] = data.get("item_id")  # Optional custom ID from client
-
     try:
-        logger.debug(f"Adding text to workspace for session {session_id}. Custom ID: {item_id}")
-        added_item = await llmcore_instance.add_text_context_item(
-            session_id=session_id,
-            content=content,
-            item_id=item_id,  # Pass along if provided
-        )
-        logger.info(f"Successfully added text item '{added_item.id}' to workspace for session {session_id}.")
-        return jsonify(added_item.model_dump(mode="json")), 201  # 201 Created
-    except SessionNotFoundError:
-        logger.warning(f"Session {session_id} not found when adding text to workspace.")
-        return jsonify({"error": "Session not found."}), 404
-    except LLMCoreError as e:
+        logger.debug(f"Adding text to workspace for session {session_id}. Custom ID: {data.get('item_id')}")
+        added_item = await api_client.add_text_to_workspace(session_id, payload=data)
+        logger.info(f"Successfully added text item to workspace for session {session_id}.")
+        return jsonify(added_item), 201  # 201 Created
+    except Exception as e:
+        # Handle different HTTP status codes from the API
+        if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+            if e.response.status_code == 404:
+                logger.warning(f"Session {session_id} not found when adding text to workspace.")
+                return jsonify({"error": "Session not found."}), 404
+            elif e.response.status_code == 503:
+                logger.error(f"LLMCore service unavailable when adding text to workspace for session {session_id}.")
+                return jsonify({"error": "LLM service not available."}), 503
+
         logger.error(f"Error adding text to workspace for session {session_id}: {e}", exc_info=True)
-        return jsonify({"error": f"Failed to add text to workspace: {str(e)}"}), 500
-    except Exception as e_unexp:
-        logger.error(f"Unexpected error adding text to workspace for session {session_id}: {e_unexp}", exc_info=True)
-        return jsonify({"error": "An unexpected server error occurred."}), 500
+        return jsonify({"error": "Failed to add text to workspace."}), 500
 
 
 @workspace_bp.route("/<session_id>/workspace/add_file", methods=["POST"])
@@ -179,45 +148,31 @@ async def add_file_to_workspace_route(session_id: str) -> Any:
     Adds a server-side file's content as a new workspace item to the specified session.
     Expects JSON payload: {"file_path": "/path/to/file_on_server", "item_id": "optional_custom_id"}
     """
-    # FIX: Import locally to prevent circular dependency on startup.
-    from ..app import llmcore_instance
-
-    if not llmcore_instance:
-        logger.error(f"Attempted to add file to workspace for session {session_id}, but LLM service is not available.")
-        return jsonify({"error": "LLM service not available."}), 503
+    api_client = get_api_client()
 
     data = request.json
     if not data or "file_path" not in data:
         logger.warning(f"Add file to workspace for session {session_id} called without 'file_path' in payload.")
         return jsonify({"error": "Missing 'file_path' in request payload."}), 400
 
-    file_path: str = data["file_path"]
-    item_id: Optional[str] = data.get("item_id")  # Optional custom ID
-
     try:
-        logger.debug(f"Adding file '{file_path}' to workspace for session {session_id}. Custom ID: {item_id}")
-        added_item = await llmcore_instance.add_file_context_item(
-            session_id=session_id,
-            file_path=file_path,
-            item_id=item_id,  # Pass along if provided
-        )
-        logger.info(f"Successfully added file item '{added_item.id}' (from path: {file_path}) to workspace for session {session_id}.")
-        return jsonify(added_item.model_dump(mode="json")), 201  # 201 Created
-    except FileNotFoundError:  # Raised by LLMCore if file_path is invalid
-        logger.warning(f"File not found at server path '{file_path}' when adding to workspace for session {session_id}.")
-        return jsonify({"error": f"File not found at server path: {file_path}"}), 404
-    except SessionNotFoundError:
-        logger.warning(f"Session {session_id} not found when adding file to workspace.")
-        return jsonify({"error": "Session not found."}), 404
-    except (
-        LLMCoreError,
-        StorageError,
-    ) as e:  # StorageError if file reading fails internally in LLMCore
-        logger.error(f"Error adding file {file_path} to workspace for session {session_id}: {e}", exc_info=True)
-        return jsonify({"error": f"Failed to add file to workspace: {str(e)}"}), 500
-    except Exception as e_unexp:
-        logger.error(f"Unexpected error adding file {file_path} to workspace for session {session_id}: {e_unexp}", exc_info=True)
-        return jsonify({"error": "An unexpected server error occurred."}), 500
+        logger.debug(f"Adding file '{data['file_path']}' to workspace for session {session_id}. Custom ID: {data.get('item_id')}")
+        added_item = await api_client.add_file_to_workspace(session_id, payload=data)
+        logger.info(f"Successfully added file item to workspace for session {session_id}.")
+        return jsonify(added_item), 201  # 201 Created
+    except Exception as e:
+        # Handle different HTTP status codes from the API
+        if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+            if e.response.status_code == 404:
+                # Could be session not found or file not found
+                logger.warning(f"Session {session_id} not found or file not found when adding file to workspace.")
+                return jsonify({"error": "Session or file not found."}), 404
+            elif e.response.status_code == 503:
+                logger.error(f"LLMCore service unavailable when adding file to workspace for session {session_id}.")
+                return jsonify({"error": "LLM service not available."}), 503
+
+        logger.error(f"Error adding file to workspace for session {session_id}: {e}", exc_info=True)
+        return jsonify({"error": "Failed to add file to workspace."}), 500
 
 
 @workspace_bp.route("/<session_id>/workspace/items/<item_id>", methods=["DELETE"])
@@ -226,31 +181,25 @@ async def remove_workspace_item_route(session_id: str, item_id: str) -> Any:
     """
     Removes a workspace item by its ID from the specified session.
     """
-    # FIX: Import locally to prevent circular dependency on startup.
-    from ..app import llmcore_instance
+    api_client = get_api_client()
 
-    if not llmcore_instance:
-        logger.error(f"Attempted to remove workspace item {item_id} for session {session_id}, but LLM service is not available.")
-        return jsonify({"error": "LLM service not available."}), 503
     try:
         logger.info(f"Attempting to remove workspace item '{item_id}' from session '{session_id}'.")
-        success = await llmcore_instance.remove_context_item(session_id, item_id)
-        if success:
-            logger.info(f"Successfully removed workspace item '{item_id}' from session '{session_id}'.")
-            return jsonify({"message": f"Workspace item '{item_id}' removed successfully."})
-        else:
-            # LLMCore's remove_context_item might return False if item not found
-            logger.warning(f"Workspace item '{item_id}' not found in session '{session_id}' for removal.")
-            return jsonify({"error": "Workspace item not found or could not be removed."}), 404
-    except SessionNotFoundError:
-        logger.warning(f"Session {session_id} not found when removing workspace item '{item_id}'.")
-        return jsonify({"error": "Session not found."}), 404
-    except LLMCoreError as e:
+        await api_client.remove_workspace_item(session_id, item_id)
+        logger.info(f"Successfully removed workspace item '{item_id}' from session '{session_id}'.")
+        return jsonify({"message": f"Workspace item '{item_id}' removed successfully."})
+    except Exception as e:
+        # Handle different HTTP status codes from the API
+        if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+            if e.response.status_code == 404:
+                logger.warning(f"Session {session_id} or workspace item '{item_id}' not found for removal.")
+                return jsonify({"error": "Session or workspace item not found."}), 404
+            elif e.response.status_code == 503:
+                logger.error(f"LLMCore service unavailable when removing workspace item {item_id} for session {session_id}.")
+                return jsonify({"error": "LLM service not available."}), 503
+
         logger.error(f"Error removing workspace item {item_id} for session {session_id}: {e}", exc_info=True)
-        return jsonify({"error": f"Failed to remove workspace item: {str(e)}"}), 500
-    except Exception as e_unexp:
-        logger.error(f"Unexpected error removing workspace item {item_id} for session {session_id}: {e_unexp}", exc_info=True)
-        return jsonify({"error": "An unexpected server error occurred."}), 500
+        return jsonify({"error": "Failed to remove workspace item."}), 500
 
 
 @workspace_bp.route("/<session_id>/workspace/add_from_message", methods=["POST"])
@@ -259,59 +208,35 @@ async def add_message_to_workspace_route(session_id: str) -> Any:
     """
     Adds content of a specific message from the session's history to its workspace items.
     Expects JSON payload: {"message_id": "id_of_message_to_add"}
-    """
-    # FIX: Import locally to prevent circular dependency on startup.
-    from ..app import llmcore_instance
 
-    if not llmcore_instance:
-        logger.error(f"Attempted to add message to workspace for session {session_id}, but LLM service is not available.")
-        return jsonify({"error": "LLM service not available."}), 503
+    SIMPLIFIED: Complex logic for loading sessions and finding messages is now
+    handled entirely by the llmcore service. This route simply passes the
+    message_id to the API endpoint.
+    """
+    api_client = get_api_client()
 
     data = request.json
     if not data or "message_id" not in data:
         logger.warning(f"Add message to workspace for session {session_id} called without 'message_id' in payload.")
         return jsonify({"error": "Missing 'message_id' in request payload."}), 400
-    message_id_to_add: str = data["message_id"]
 
     try:
-        logger.debug(f"Attempting to add message '{message_id_to_add}' to workspace for session '{session_id}'.")
-        session_obj = await llmcore_instance.get_session(session_id)
-        if not session_obj:  # Should be caught by SessionNotFoundError if LLMCore raises it
-            logger.warning(f"Session {session_id} not found when trying to add message {message_id_to_add} to workspace.")
-            return jsonify({"error": "Session not found."}), 404  # Defensive
+        logger.debug(f"Attempting to add message '{data['message_id']}' to workspace for session '{session_id}'.")
+        added_item = await api_client.add_message_to_workspace(session_id, payload=data)
+        logger.info(f"Successfully added message to workspace for session {session_id}.")
+        return jsonify(added_item), 201  # 201 Created
+    except Exception as e:
+        # Handle different HTTP status codes from the API
+        if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+            if e.response.status_code == 404:
+                logger.warning(f"Session {session_id} or message not found when adding message to workspace.")
+                return jsonify({"error": "Session or message not found."}), 404
+            elif e.response.status_code == 503:
+                logger.error(f"LLMCore service unavailable when adding message to workspace for session {session_id}.")
+                return jsonify({"error": "LLM service not available."}), 503
 
-        message_to_add = next(
-            (m for m in session_obj.messages if m.id == message_id_to_add), None
-        )
-        if not message_to_add:
-            logger.warning(f"Message '{message_id_to_add}' not found in session '{session_id}' to add to workspace.")
-            return jsonify({"error": "Message not found in session."}), 404
-
-        # Create a unique ID for the new workspace item derived from the message ID
-        workspace_item_id = f"ws_from_msg_{message_id_to_add[:8]}"  # Example ID generation
-        added_item = await llmcore_instance.add_text_context_item(
-            session_id=session_id,
-            content=message_to_add.content,
-            item_id=workspace_item_id,  # Use the generated or a more robust unique ID
-            source_id=f"message:{message_id_to_add}",  # Reference the original message
-            metadata={
-                "original_message_role": message_to_add.role.value
-                if isinstance(message_to_add.role, LLMCoreRole)
-                else str(message_to_add.role),
-                "original_message_id": message_id_to_add,
-            },
-        )
-        logger.info(f"Successfully added message '{message_id_to_add}' as workspace item '{added_item.id}' for session {session_id}.")
-        return jsonify(added_item.model_dump(mode="json")), 201  # 201 Created
-    except SessionNotFoundError:
-        logger.warning(f"Session {session_id} not found when adding message {message_id_to_add} to workspace.")
-        return jsonify({"error": "Session not found."}), 404
-    except LLMCoreError as e:
-        logger.error(f"Error adding message {message_id_to_add} to workspace for session {session_id}: {e}", exc_info=True)
-        return jsonify({"error": f"Failed to add message to workspace: {str(e)}"}), 500
-    except Exception as e_unexp:
-        logger.error(f"Unexpected error adding message {message_id_to_add} to workspace for session {session_id}: {e_unexp}", exc_info=True)
-        return jsonify({"error": "An unexpected server error occurred."}), 500
+        logger.error(f"Error adding message to workspace for session {session_id}: {e}", exc_info=True)
+        return jsonify({"error": "Failed to add message to workspace."}), 500
 
 
 # --- Context Preview API Endpoint ---
@@ -322,8 +247,11 @@ async def preview_context_route(session_id: str) -> Any:
     """
     Previews the full context that LLMCore would prepare for a chat interaction.
     This includes message history, RAG documents (if enabled), and explicitly staged items.
-    Uses settings from the current Flask session (RAG, LLM provider/model, system message).
-    This handler now enriches the response with the provider and model names.
+
+    SIMPLIFIED: The complex logic for resolving staged items and enriching responses
+    with provider/model names is now handled entirely by the llmcore service.
+    This route constructs the preview request payload from Flask session data
+    and passes it to the API endpoint.
 
     Expects JSON payload:
     {
@@ -331,12 +259,7 @@ async def preview_context_route(session_id: str) -> Any:
         "staged_items": "Optional: Array of client-side staged items to include in preview."
     }
     """
-    # FIX: Import locally to prevent circular dependency on startup.
-    from ..app import llmcore_instance
-
-    if not llmcore_instance:
-        logger.error(f"Attempted to preview context for session {session_id}, but LLM service is not available.")
-        return jsonify({"error": "LLM service not available."}), 503
+    api_client = get_api_client()
 
     data = request.json
     current_query_for_preview: Optional[str] = data.get("current_query") if data else None
@@ -345,53 +268,37 @@ async def preview_context_route(session_id: str) -> Any:
     logger.debug(f"Previewing context for session {session_id}. Query: '{current_query_for_preview}'. Staged items from JS: {len(staged_items_from_js)}")
 
     try:
-        # Resolve client-side staged items into LLMCore objects
-        # This helper is currently imported from chat_routes.
-        explicitly_staged_items_for_core: List[
-            Union[Any, Any]
-        ] = await _resolve_staged_items_for_core(staged_items_from_js, session_id)
+        # Build the complete payload with all necessary context from Flask session
+        # The llmcore service will handle resolving staged items and providing complete context details
+        preview_payload = {
+            "current_query": current_query_for_preview or "",
+            "staged_items": staged_items_from_js,
+            # Include current LLM and RAG settings from Flask session
+            "system_message": flask_session.get("system_message"),
+            "provider_name": flask_session.get("current_provider_name"),
+            "model_name": flask_session.get("current_model_name"),
+            "enable_rag": flask_session.get("rag_enabled", False),
+            "rag_collection_name": flask_session.get("rag_collection_name"),
+            "rag_retrieval_k": flask_session.get("rag_k_value"),
+            "rag_metadata_filter": flask_session.get("rag_filter"),
+            "prompt_template_values": flask_session.get("prompt_template_values", {}),
+        }
 
-        # Retrieve provider and model from session to pass to core and to enrich response
-        provider_name = flask_session.get("current_provider_name")
-        model_name = flask_session.get("current_model_name")
-
-        # Call LLMCore's preview method
-        preview_details_dict = await llmcore_instance.preview_context_for_chat(
-            current_user_query=current_query_for_preview or "",  # Must be a string
-            session_id=session_id,
-            # Get LLM and RAG settings from Flask session
-            system_message=flask_session.get("system_message"),
-            provider_name=provider_name,
-            model_name=model_name,
-            explicitly_staged_items=explicitly_staged_items_for_core,  # type: ignore
-            enable_rag=flask_session.get("rag_enabled", False),
-            rag_collection_name=flask_session.get("rag_collection_name"),
-            rag_retrieval_k=flask_session.get("rag_k_value"),
-            rag_metadata_filter=flask_session.get("rag_filter"),  # dict or None
-            prompt_template_values=flask_session.get("prompt_template_values", {}),
-        )
-
-        # --- FIX: Enrich the response dictionary ---
-        # Rationale: The `ContextPreparationDetails` model from llmcore does not
-        # include provider_name or model_name. The frontend needs this information
-        # to render the preview modal correctly. This route handler has access to
-        # these values from the Flask session, so we add them to the dictionary
-        # before sending it as a JSON response.
-        preview_details_dict["provider_name"] = provider_name
-        preview_details_dict["model_name"] = model_name
-        # --- END FIX ---
-
+        preview_details = await api_client.preview_context(session_id, payload=preview_payload)
         logger.info(f"Successfully generated context preview for session {session_id}.")
-        return jsonify(preview_details_dict)  # Already a dict from model_dump
-    except SessionNotFoundError:
-        logger.warning(f"Session {session_id} not found when generating context preview.")
-        return jsonify({"error": "Session not found."}), 404
-    except LLMCoreError as e:
+        return jsonify(preview_details)
+    except Exception as e:
+        # Handle different HTTP status codes from the API
+        if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+            if e.response.status_code == 404:
+                logger.warning(f"Session {session_id} not found when generating context preview.")
+                return jsonify({"error": "Session not found."}), 404
+            elif e.response.status_code == 503:
+                logger.error(f"LLMCore service unavailable when generating context preview for session {session_id}.")
+                return jsonify({"error": "LLM service not available."}), 503
+
         logger.error(f"Error generating context preview for session {session_id}: {e}", exc_info=True)
-        return jsonify({"error": f"Failed to generate context preview: {str(e)}"}), 500
-    except Exception as e_resolve_preview:  # Catch errors from _resolve_staged_items_for_core or other unexpected
-        logger.error(f"Unexpected error resolving or generating context preview for session {session_id}: {e_resolve_preview}", exc_info=True)
-        return jsonify({"error": f"Failed to process or generate context preview: {str(e_resolve_preview)}"}), 500
+        return jsonify({"error": "Failed to generate context preview."}), 500
 
 
-logger.info("Workspace and context management routes defined on workspace_bp.")
+logger.info("Workspace and context management routes defined on workspace_bp (API-driven implementation).")

@@ -1,0 +1,208 @@
+/* llmchat_web/static/css/components/_rag.css */
+/* Contains styles for the RAG tab, RAG inspector, and memory access visualizations in the agent UI. */
+
+/* RAG Tab Styling */
+#rag-pane-main .form-label {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+#rag-pane-main .form-select,
+#rag-pane-main .form-control {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+    font-size: 0.9rem;
+}
+#rag-pane-main .form-select:disabled,
+#rag-pane-main .form-control:disabled {
+    background-color: var(--bg-element-hover);
+    opacity: 0.7;
+}
+#rag-pane-main .btn {
+    font-size: 0.9rem;
+}
+#rag-pane-main h6 {
+    color: var(--text-primary);
+    margin-top: 1rem;
+    margin-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border-primary);
+    padding-bottom: 0.25rem;
+}
+
+/* RAG Inspector styling */
+#rag-retrieved-docs-display .list-group-item {
+    background-color: var(--bg-element);
+    border-color: var(--border-primary);
+    color: var(--text-primary);
+    padding: 0.5rem 0.75rem;
+}
+#rag-retrieved-docs-display h6 {
+    color: var(--text-info);
+    margin-bottom: 0.25rem;
+    border: none;
+}
+#rag-retrieved-docs-display pre {
+    background-color: var(--bg-input);
+    padding: 5px;
+    border-radius: 3px;
+    max-height: 80px;
+    overflow-y: auto;
+    font-size: 0.8em;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+#rag-retrieved-docs-display .rag-doc-actions .btn {
+    font-size: 0.75rem;
+}
+
+/* Memory Access Visualization Styles (for Agent UI) */
+.memory-indicator {
+    animation: pulse-brain 2s infinite;
+}
+
+@keyframes pulse-brain {
+    0% {
+        opacity: 0.6;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.1);
+    }
+    100% {
+        opacity: 0.6;
+        transform: scale(1);
+    }
+}
+
+.memory-search-action {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem;
+    background-color: var(--bg-element);
+    border: 1px solid var(--accent-info);
+    border-radius: 0.25rem;
+    color: var(--text-info);
+    margin: 0.5rem 0;
+}
+
+.memory-search-action .spinner-border {
+    color: var(--accent-info);
+}
+
+.retrieved-docs-container {
+    margin-top: 0.5rem;
+    border: 1px solid var(--border-primary);
+    border-radius: 0.375rem;
+    background-color: var(--bg-quaternary);
+    padding: 0.75rem;
+}
+
+.memory-search-header {
+    display: flex;
+    align-items: center;
+    font-weight: 600;
+    color: var(--accent-success);
+    margin-bottom: 0.5rem;
+}
+
+.memory-results-container {
+    margin-top: 0.5rem;
+}
+
+.retrieved-doc-item {
+    border: 1px solid var(--border-primary);
+    border-radius: 0.25rem;
+    padding: 0.5rem;
+    margin-bottom: 0.5rem;
+    background-color: var(--bg-input);
+}
+
+.retrieved-doc-header {
+    font-size: 0.8rem;
+    margin-bottom: 0.25rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.retrieved-doc-content {
+    font-size: 0.85rem;
+    max-height: 120px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background-color: var(--bg-element);
+    padding: 0.5rem;
+    border-radius: 0.25rem;
+    font-family: var(--bs-font-monospace, "Courier New", monospace);
+    line-height: 1.4;
+}
+
+.memory-text-result {
+    font-family: inherit;
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+}
+
+.memory-observation-fallback {
+    padding: 0.5rem;
+    background-color: var(--bg-element);
+    border-radius: 0.25rem;
+    border-left: 3px solid var(--accent-warning);
+}
+
+.memory-result-text {
+    background-color: var(--bg-input);
+    padding: 0.5rem;
+    border-radius: 0.25rem;
+    max-height: 150px;
+    overflow-y: auto;
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
+}
+
+.retrieved-docs-container .btn-outline-info {
+    border-color: var(--accent-info);
+    color: var(--accent-info);
+    transition: all 0.2s ease;
+}
+
+.retrieved-docs-container .btn-outline-info:hover {
+    background-color: var(--accent-info);
+    color: var(--text-on-accent);
+    transform: translateY(-1px);
+}
+
+.agent-step-content .memory-search-action,
+.agent-step-content .retrieved-docs-container {
+    font-family: inherit;
+    font-size: inherit;
+    white-space: normal;
+}
+
+.agent-step-observation .retrieved-docs-container {
+    border-color: var(--accent-success);
+    background-color: rgba(25, 135, 84, 0.1);
+}
+
+.agent-step-observation .memory-search-header {
+    color: var(--accent-success);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .retrieved-doc-content {
+        max-height: 80px;
+        font-size: 0.8rem;
+    }
+
+    .memory-search-action {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.25rem;
+    }
+
+    .memory-search-header {
+        font-size: 0.9rem;
+    }
+}

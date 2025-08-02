@@ -1,0 +1,56 @@
+<nav class="top-bar d-flex justify-content-between align-items-center">
+    <div>
+        <span class="llmchat-brand"
+            ><img
+                src="{{ url_for('static', filename='favicon.ico') }}"
+            />LLMChat Web
+            <small id="app-version-display" class="text-muted"
+                >v{{ app_version }}</small
+            >
+        </span>
+    </div>
+    <div class="d-flex align-items-center">
+        <span class="status-item"
+            >Provider:
+            <span id="status-provider" class="badge bg-secondary">N/A</span>
+        </span>
+        <span class="status-item"
+            >Model:
+            <span id="status-model" class="badge bg-secondary">N/A</span>
+        </span>
+        <span class="status-item"
+            >RAG: <span id="status-rag" class="badge bg-danger">OFF</span></span
+        >
+        <span class="status-item"
+            >Coworker:
+            <span id="status-coworker" class="badge bg-danger">OFF</span>
+        </span>
+        <span class="status-item"
+            >Context:
+            <span id="status-context-usage" class="badge bg-info"
+                >0/0 (0%)</span
+            >
+        </span>
+        <!-- START: Theme Switcher Dropdown -->
+        <div class="dropdown ms-2">
+            <button
+                class="btn btn-sm btn-outline-secondary dropdown-toggle"
+                type="button"
+                id="theme-switcher-btn"
+                data-bs-toggle="dropdown"
+                aria-expanded="false"
+                title="Change Theme"
+            >
+                <i class="fas fa-palette"></i>
+            </button>
+            <ul
+                class="dropdown-menu dropdown-menu-end"
+                id="theme-switcher-list"
+                aria-labelledby="theme-switcher-btn"
+            >
+                <!-- Theme items will be populated here by JavaScript -->
+            </ul>
+        </div>
+        <!-- END: Theme Switcher Dropdown -->
+    </div>
+</nav>

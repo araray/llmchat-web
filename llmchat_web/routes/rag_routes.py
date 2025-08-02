@@ -1,12 +1,13 @@
 # llmchat_web/routes/rag_routes.py
 """
-Flask routes for RAG functionalities - currently stubbed.
+Flask routes for RAG functionalities.
 """
 import logging
 from flask import jsonify, request
 from flask import session as flask_session
 from . import rag_bp
-from ..app import logger as app_logger
+from ..app import async_to_sync_in_flask, logger as app_logger
+from ..services import get_api_client
 
 logger = logging.getLogger("llmchat_web.routes.rag")
 if not logger.handlers and app_logger:
@@ -38,236 +39,71 @@ def update_rag_settings_route():
     })
 
 @rag_bp.route("/direct_search", methods=["POST"])
-def direct_rag_search_route():
-    logger.info("Direct RAG search requested - returning stubbed response")
-    return jsonify({"error": "RAG search not yet implemented - LLMCore API endpoints pending"}), 501
+@async_to_sync_in_flask
+async def direct_rag_search_route():
+    """
+    Perform a direct semantic search against the llmcore memory system.
 
-logger.info("RAG routes defined on rag_bp (currently stubbed).")
+    --- Rationale Block ---
+    Pre-state: Returned a 501 stub response indicating feature not implemented
+    Limitation: Users had no way to directly search RAG collections to explore content
+    Decision Path: Implement as an async proxy to llmcore's /api/v2/memory/semantic/search
+                   endpoint, extracting parameters from POST JSON and calling new API client method
+    Post-state: Users can now perform live semantic searches and view results in modal
+    """
+    try:
+        # Validate request data
+        data = request.json or {}
+        query = data.get('query', '').strip()
 
+        if not query:
+            logger.warning("Direct RAG search called without query parameter")
+            return jsonify({"error": "Query parameter is required and cannot be empty"}), 400
 
-# llmchat_web/routes/settings_routes.py
-"""
-Flask routes for managing application settings - partially stubbed.
-"""
-import logging
-from typing import Any, Optional
-from flask import jsonify, request
-from flask import session as flask_session
-from . import settings_bp
-from ..app import logger as app_logger
+        # Extract search parameters
+        collection_name = data.get('collection_name')
+        k = data.get('k', 3)
+        filter_metadata = data.get('filter')
 
-logger = logging.getLogger("llmchat_web.routes.settings")
-if not logger.handlers and app_logger:
-    logger.parent = logging.getLogger("llmchat_web.routes")
+        # Validate k parameter
+        if not isinstance(k, int) or k < 1 or k > 20:
+            logger.warning(f"Invalid k value: {k}. Must be integer between 1 and 20")
+            k = 3  # Use default instead of failing
 
-@settings_bp.route("/llm/providers", methods=["GET"])
-def get_llm_providers_route():
-    logger.info("LLM providers requested - returning stubbed response")
-    return jsonify(["openai", "anthropic", "ollama"])  # Basic stub
+        logger.info(f"Performing direct RAG search: query='{query[:50]}...', collection='{collection_name}', k={k}")
 
-@settings_bp.route("/llm/providers/<provider_name>/models", methods=["GET"])
-def get_llm_models_route(provider_name: str):
-    logger.info(f"Models for provider {provider_name} requested - returning stubbed response")
-    stub_models = {
-        "openai": ["gpt-4", "gpt-3.5-turbo"],
-        "anthropic": ["claude-3-sonnet", "claude-3-haiku"],
-        "ollama": ["llama2", "mistral"]
-    }
-    return jsonify(stub_models.get(provider_name, []))
+        # Get API client and perform search
+        api_client = get_api_client()
+        search_results = await api_client.search_semantic_memory(
+            query=query,
+            collection_name=collection_name,
+            k=k,
+            filter_metadata=filter_metadata
+        )
 
-@settings_bp.route("/llm/update", methods=["POST"])
-def update_llm_settings_route():
-    data = request.json or {}
-    new_provider_name = data.get('provider_name')
-    new_model_name = data.get('model_name')
+        logger.info(f"Direct RAG search completed successfully: found {len(search_results)} results")
+        return jsonify(search_results)
 
-    if new_provider_name:
-        flask_session['current_provider_name'] = new_provider_name
-        flask_session['current_model_name'] = new_model_name
-        flask_session.modified = True
+    except Exception as e:
+        error_msg = str(e).lower()
+        logger.error(f"Error in direct RAG search: {e}", exc_info=True)
 
-        logger.info(f"LLM settings updated: Provider={new_provider_name}, Model={new_model_name}")
-        return jsonify({
-            "message": "LLM settings updated in session.",
-            "llm_settings": {
-                "provider_name": flask_session['current_provider_name'],
-                "model_name": flask_session['current_model_name'],
-            }
-        })
-    else:
-        return jsonify({"error": "Provider name is required"}), 400
+        # Handle specific error types with appropriate HTTP status codes
+        if "collection not found" in error_msg or ("collection" in error_msg and "not found" in error_msg):
+            return jsonify({
+                "error": f"Collection '{data.get('collection_name', 'unknown')}' not found"
+            }), 404
+        elif "connection" in error_msg or "timeout" in error_msg:
+            return jsonify({
+                "error": "Unable to connect to search service. Please try again later."
+            }), 503
+        elif "authentication" in error_msg or "authorization" in error_msg:
+            return jsonify({
+                "error": "Authentication failed with search service"
+            }), 401
+        else:
+            return jsonify({
+                "error": f"Search failed: {str(e)}"
+            }), 500
 
-@settings_bp.route("/system_message", methods=["GET"])
-def get_system_message_route():
-    system_msg = flask_session.get('system_message', "")
-    return jsonify({"system_message": system_msg})
-
-@settings_bp.route("/system_message/update", methods=["POST"])
-def update_system_message_route():
-    data = request.json or {}
-    new_system_message = data.get('system_message', "")
-    flask_session['system_message'] = new_system_message
-    flask_session.modified = True
-    logger.info(f"System message updated")
-    return jsonify({"message": "System message updated in session.", "system_message": new_system_message})
-
-@settings_bp.route("/prompt_template_values", methods=["GET"])
-def get_prompt_template_values_route():
-    values = flask_session.get('prompt_template_values', {})
-    return jsonify({"prompt_template_values": values})
-
-@settings_bp.route("/prompt_template_values/update", methods=["POST"])
-def update_prompt_template_value_route():
-    data = request.json or {}
-    if "key" not in data or "value" not in data:
-        return jsonify({"error": "Missing 'key' or 'value'"}), 400
-
-    if 'prompt_template_values' not in flask_session:
-        flask_session['prompt_template_values'] = {}
-
-    flask_session['prompt_template_values'][str(data["key"])] = str(data["value"])
-    flask_session.modified = True
-    return jsonify({"prompt_template_values": flask_session['prompt_template_values']})
-
-@settings_bp.route("/prompt_template_values/delete_key", methods=["POST"])
-def delete_prompt_template_value_route():
-    data = request.json or {}
-    if "key" not in data:
-        return jsonify({"error": "Missing 'key'"}), 400
-
-    if 'prompt_template_values' in flask_session and str(data["key"]) in flask_session['prompt_template_values']:
-        del flask_session['prompt_template_values'][str(data["key"])]
-        flask_session.modified = True
-
-    return jsonify({"prompt_template_values": flask_session.get('prompt_template_values', {})})
-
-@settings_bp.route("/prompt_template_values/clear_all", methods=["POST"])
-def clear_all_prompt_template_values_route():
-    flask_session['prompt_template_values'] = {}
-    flask_session.modified = True
-    return jsonify({"prompt_template_values": {}})
-
-logger.info("Settings routes defined on settings_bp (partially stubbed).")
-
-
-# llmchat_web/routes/ingest_routes.py
-"""
-Flask routes for data ingestion - currently stubbed.
-"""
-import logging
-from flask import jsonify, Response
-from . import ingest_bp
-from ..app import logger as app_logger
-
-logger = logging.getLogger("llmchat_web.routes.ingest")
-if not logger.handlers and app_logger:
-    logger.parent = logging.getLogger("llmchat_web.routes")
-
-@ingest_bp.route("", methods=["POST"])
-def ingest_data_route():
-    logger.info("Data ingestion requested - returning stubbed response")
-
-    def error_stream():
-        yield f"data: {{'type': 'error', 'error': 'Ingestion not yet implemented - LLMCore API endpoints pending'}}\n\n"
-        yield f"data: {{'type': 'end'}}\n\n"
-
-    return Response(error_stream(), mimetype='text/event-stream')
-
-logger.info("Ingestion routes defined on ingest_bp (currently stubbed).")
-
-
-# llmchat_web/routes/workspace_routes.py
-"""
-Flask routes for workspace management - currently stubbed.
-"""
-import logging
-from flask import jsonify
-from . import workspace_bp
-from ..app import logger as app_logger
-
-logger = logging.getLogger("llmchat_web.routes.workspace")
-if not logger.handlers and app_logger:
-    logger.parent = logging.getLogger("llmchat_web.routes")
-
-@workspace_bp.route("/<session_id>/workspace/items", methods=["GET"])
-def list_workspace_items_route(session_id: str):
-    logger.info(f"Workspace items requested for session {session_id} - returning stubbed response")
-    return jsonify([])
-
-@workspace_bp.route("/<session_id>/workspace/items/<item_id>", methods=["GET"])
-def get_workspace_item_route(session_id: str, item_id: str):
-    logger.info(f"Workspace item {item_id} requested - returning stubbed response")
-    return jsonify({"error": "Workspace operations not yet implemented - LLMCore API endpoints pending"}), 501
-
-@workspace_bp.route("/<session_id>/workspace/add_text", methods=["POST"])
-def add_text_to_workspace_route(session_id: str):
-    logger.info("Add text to workspace requested - returning stubbed response")
-    return jsonify({"error": "Workspace operations not yet implemented - LLMCore API endpoints pending"}), 501
-
-@workspace_bp.route("/<session_id>/workspace/add_file", methods=["POST"])
-def add_file_to_workspace_route(session_id: str):
-    logger.info("Add file to workspace requested - returning stubbed response")
-    return jsonify({"error": "Workspace operations not yet implemented - LLMCore API endpoints pending"}), 501
-
-@workspace_bp.route("/<session_id>/workspace/items/<item_id>", methods=["DELETE"])
-def remove_workspace_item_route(session_id: str, item_id: str):
-    logger.info("Remove workspace item requested - returning stubbed response")
-    return jsonify({"error": "Workspace operations not yet implemented - LLMCore API endpoints pending"}), 501
-
-@workspace_bp.route("/<session_id>/workspace/add_from_message", methods=["POST"])
-def add_message_to_workspace_route(session_id: str):
-    logger.info("Add message to workspace requested - returning stubbed response")
-    return jsonify({"error": "Workspace operations not yet implemented - LLMCore API endpoints pending"}), 501
-
-@workspace_bp.route("/<session_id>/context/preview", methods=["POST"])
-def preview_context_route(session_id: str):
-    logger.info("Context preview requested - returning stubbed response")
-    return jsonify({"error": "Context preview not yet implemented - LLMCore API endpoints pending"}), 501
-
-logger.info("Workspace routes defined on workspace_bp (currently stubbed).")
-
-
-# llmchat_web/routes/preset_routes.py
-"""
-Flask routes for managing context presets - currently stubbed.
-"""
-import logging
-from flask import jsonify
-from . import preset_bp
-from ..app import logger as app_logger
-
-logger = logging.getLogger("llmchat_web.routes.presets")
-if not logger.handlers and app_logger:
-    logger.parent = logging.getLogger("llmchat_web.routes")
-
-@preset_bp.route("", methods=["GET"])
-def list_presets_route():
-    logger.info("Presets list requested - returning stubbed response")
-    return jsonify([])
-
-@preset_bp.route("", methods=["POST"])
-def create_preset_route():
-    logger.info("Create preset requested - returning stubbed response")
-    return jsonify({"error": "Preset operations not yet implemented - LLMCore API endpoints pending"}), 501
-
-@preset_bp.route("/<path:preset_name>", methods=["GET"])
-def get_preset_route(preset_name: str):
-    logger.info(f"Get preset {preset_name} requested - returning stubbed response")
-    return jsonify({"error": "Preset operations not yet implemented - LLMCore API endpoints pending"}), 501
-
-@preset_bp.route("/<path:preset_name>", methods=["PUT"])
-def update_preset_route(preset_name: str):
-    logger.info(f"Update preset {preset_name} requested - returning stubbed response")
-    return jsonify({"error": "Preset operations not yet implemented - LLMCore API endpoints pending"}), 501
-
-@preset_bp.route("/<path:preset_name>", methods=["DELETE"])
-def delete_preset_route(preset_name: str):
-    logger.info(f"Delete preset {preset_name} requested - returning stubbed response")
-    return jsonify({"error": "Preset operations not yet implemented - LLMCore API endpoints pending"}), 501
-
-@preset_bp.route("/<path:old_name>/rename", methods=["POST"])
-def rename_preset_route(old_name: str):
-    logger.info(f"Rename preset {old_name} requested - returning stubbed response")
-    return jsonify({"error": "Preset operations not yet implemented - LLMCore API endpoints pending"}), 501
-
-logger.info("Preset routes defined on preset_bp (currently stubbed).")
+logger.info("RAG routes defined on rag_bp (Direct RAG search now implemented).")

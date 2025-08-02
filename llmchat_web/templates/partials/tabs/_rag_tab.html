@@ -1,0 +1,126 @@
+<div
+    class="tab-pane fade"
+    id="rag-pane-main"
+    role="tabpanel"
+    aria-labelledby="rag-tab-main-btn"
+    tabindex="0"
+>
+    <h6><i class="fas fa-cogs"></i> RAG Configuration</h6>
+    <form id="rag-controls-form">
+        <div class="row g-2 align-items-center">
+            <div class="col-auto">
+                <div class="form-check form-switch">
+                    <input
+                        class="form-check-input"
+                        type="checkbox"
+                        role="switch"
+                        id="rag-toggle-switch"
+                    />
+                    <label
+                        class="form-check-label small"
+                        for="rag-toggle-switch"
+                        >Enable RAG</label
+                    >
+                </div>
+            </div>
+            <div class="col-md-4">
+                <label
+                    for="rag-collection-select"
+                    class="form-label form-label-sm visually-hidden"
+                    >RAG Collection</label
+                >
+                <select
+                    class="form-select form-select-sm"
+                    id="rag-collection-select"
+                    aria-label="Select RAG Collection"
+                    disabled
+                >
+                    <option selected value="">Select Collection...</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label
+                    for="rag-k-value"
+                    class="form-label form-label-sm visually-hidden"
+                    >K Value</label
+                >
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text">K:</span>
+                    <input
+                        type="number"
+                        class="form-control"
+                        id="rag-k-value"
+                        value="3"
+                        min="1"
+                        max="20"
+                        disabled
+                    />
+                </div>
+            </div>
+            <div class="col-md-3">
+                <label
+                    for="rag-filter-input"
+                    class="form-label form-label-sm visually-hidden"
+                    >Metadata Filter</label
+                >
+                <input
+                    type="text"
+                    class="form-control form-control-sm"
+                    id="rag-filter-input"
+                    placeholder="Metadata Filter (JSON)..."
+                    disabled
+                />
+            </div>
+            <div class="col-auto">
+                <button
+                    type="button"
+                    class="btn btn-sm btn-success"
+                    id="btn-ingest-data"
+                    title="Ingest new data into a RAG collection"
+                >
+                    <i class="fas fa-database"></i> Ingest Data
+                </button>
+            </div>
+        </div>
+    </form>
+
+    <hr class="my-3" />
+    <h6><i class="fas fa-search"></i> Direct RAG Search</h6>
+    <form id="direct-rag-search-form">
+        <div class="input-group input-group-sm mb-2">
+            <input
+                type="text"
+                class="form-control"
+                id="direct-rag-search-query"
+                placeholder="Enter search query..."
+                required
+            />
+            <button
+                class="btn btn-info"
+                type="submit"
+                id="btn-direct-rag-search"
+            >
+                <i class="fas fa-search"></i> Search
+            </button>
+        </div>
+    </form>
+    <p class="small text-muted mt-1">
+        Uses current RAG settings (collection, K, filter) for the search.
+        Results will appear in a modal.
+    </p>
+
+    <!-- Start: New RAG Results Display Area -->
+    <hr class="my-3" />
+    <h6><i class="fas fa-book-open"></i> Retrieved Documents for Last Chat</h6>
+    <div
+        id="rag-retrieved-docs-display"
+        class="border rounded p-2 d-none"
+        style="max-height: 250px; overflow-y: auto"
+    >
+        <p class="text-muted small">
+            After a RAG-enabled chat, retrieved documents will be displayed
+            here.
+        </p>
+    </div>
+    <!-- End: New RAG Results Display Area -->
+</div>

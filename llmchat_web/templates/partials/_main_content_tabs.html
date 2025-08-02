@@ -1,0 +1,98 @@
+<!-- Tab navigation buttons -->
+<ul class="nav nav-tabs px-2 pt-2" id="mainContentTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button
+            class="nav-link active"
+            id="chat-tab-btn"
+            data-bs-toggle="tab"
+            data-bs-target="#chat-tab-pane"
+            type="button"
+            role="tab"
+            aria-controls="chat-tab-pane"
+            aria-selected="true"
+        >
+            <i class="fas fa-comment-dots"></i> Chat
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button
+            class="nav-link"
+            id="agents-tab-btn"
+            data-bs-toggle="tab"
+            data-bs-target="#agents-tab-pane"
+            type="button"
+            role="tab"
+            aria-controls="agents-tab-pane"
+            aria-selected="false"
+        >
+            <i class="fas fa-robot"></i> Agents
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button
+            class="nav-link"
+            id="activity-tab-btn"
+            data-bs-toggle="tab"
+            data-bs-target="#activity-tab-pane"
+            type="button"
+            role="tab"
+            aria-controls="activity-tab-pane"
+            aria-selected="false"
+        >
+            <i class="fas fa-tasks"></i> Activity
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button
+            class="nav-link"
+            id="context-manager-tab-btn"
+            data-bs-toggle="tab"
+            data-bs-target="#context-manager-tab-pane"
+            type="button"
+            role="tab"
+            aria-controls="context-manager-tab-pane"
+            aria-selected="false"
+        >
+            <i class="fas fa-folder-open"></i> Context Manager
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button
+            class="nav-link"
+            id="prompts-tab-btn"
+            data-bs-toggle="tab"
+            data-bs-target="#prompts-tab-pane"
+            type="button"
+            role="tab"
+            aria-controls="prompts-tab-pane"
+            aria-selected="false"
+        >
+            <i class="fas fa-star"></i> Prompts
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button
+            class="nav-link"
+            id="rag-tab-main-btn"
+            data-bs-toggle="tab"
+            data-bs-target="#rag-pane-main"
+            type="button"
+            role="tab"
+            aria-controls="rag-pane-main"
+            aria-selected="false"
+        >
+            <i class="fas fa-brain"></i> RAG
+        </button>
+    </li>
+</ul>
+
+<!-- Container for tab content panes -->
+<div class="tab-content flex-grow-1 overflow-auto" id="mainContentTabsContent">
+    <!-- Each tab pane is now included from its own partial file -->
+    {% include 'partials/tabs/_chat_tab.html' %} {% include
+    'partials/tabs/_agents_tab.html' %} {% include
+    'partials/tabs/_activity_tab.html' %} {% include
+    'partials/tabs/_context_manager_tab.html' %} {% include
+    'partials/tabs/_prompts_tab.html' %} {% include
+    'partials/tabs/_rag_tab.html' %}
+</div>

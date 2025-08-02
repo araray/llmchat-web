@@ -1,0 +1,583 @@
+<!-- Modals -->
+<div
+    class="modal fade"
+    id="viewItemContentModal"
+    tabindex="-1"
+    aria-labelledby="viewItemContentModalLabel"
+    aria-hidden="true"
+>
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title" id="viewItemContentModalLabel">
+                    Item Content
+                </h5>
+                <button
+                    type="button"
+                    class="btn-close btn-close-white"
+                    data-bs-dismiss="modal"
+                    aria-label="Close"
+                ></button>
+            </div>
+            <div class="modal-body">
+                <pre
+                    id="modalItemContentDisplay"
+                    style="white-space: pre-wrap; word-wrap: break-word"
+                ></pre>
+            </div>
+            <div class="modal-footer">
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-bs-dismiss="modal"
+                >
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div
+    class="modal fade"
+    id="contextPreviewModal"
+    tabindex="-1"
+    aria-labelledby="contextPreviewModalLabel"
+    aria-hidden="true"
+>
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title" id="contextPreviewModalLabel">
+                    <i class="fas fa-search-plus"></i> Full Context Preview
+                </h5>
+                <button
+                    type="button"
+                    class="btn-close btn-close-white"
+                    data-bs-dismiss="modal"
+                    aria-label="Close"
+                ></button>
+            </div>
+            <div
+                class="modal-body"
+                id="modalContextPreviewDisplay"
+                style="font-size: 0.85rem"
+            >
+                <p class="text-muted">Loading context preview...</p>
+            </div>
+            <div class="modal-footer">
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-bs-dismiss="modal"
+                >
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div
+    class="modal fade"
+    id="ingestionModal"
+    tabindex="-1"
+    aria-labelledby="ingestionModalLabel"
+    aria-hidden="true"
+>
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title" id="ingestionModalLabel">
+                    <i class="fas fa-upload"></i> Ingest Data for RAG
+                </h5>
+                <button
+                    type="button"
+                    class="btn-close btn-close-white"
+                    data-bs-dismiss="modal"
+                    aria-label="Close"
+                ></button>
+            </div>
+            <div class="modal-body">
+                <ul
+                    class="nav nav-tabs mb-3"
+                    id="ingestionTypeTabs"
+                    role="tablist"
+                >
+                    <li class="nav-item" role="presentation">
+                        <button
+                            class="nav-link active"
+                            id="ingest-file-tab"
+                            data-bs-toggle="tab"
+                            data-bs-target="#ingest-file-pane"
+                            type="button"
+                            role="tab"
+                            aria-controls="ingest-file-pane"
+                            aria-selected="true"
+                        >
+                            <i class="fas fa-file-alt"></i> Upload File(s)
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button
+                            class="nav-link"
+                            id="ingest-dir-tab"
+                            data-bs-toggle="tab"
+                            data-bs-target="#ingest-dir-pane"
+                            type="button"
+                            role="tab"
+                            aria-controls="ingest-dir-pane"
+                            aria-selected="false"
+                        >
+                            <i class="fas fa-folder-open"></i> Upload Directory
+                            (ZIP)
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button
+                            class="nav-link"
+                            id="ingest-git-tab"
+                            data-bs-toggle="tab"
+                            data-bs-target="#ingest-git-pane"
+                            type="button"
+                            role="tab"
+                            aria-controls="ingest-git-pane"
+                            aria-selected="false"
+                        >
+                            <i class="fab fa-git-alt"></i> Git Repository URL
+                        </button>
+                    </li>
+                </ul>
+                <div class="tab-content" id="ingestionTypeTabsContent">
+                    <div
+                        class="tab-pane fade show active"
+                        id="ingest-file-pane"
+                        role="tabpanel"
+                        aria-labelledby="ingest-file-tab"
+                    >
+                        <form id="form-ingest-file">
+                            <div class="mb-3">
+                                <label
+                                    for="ingest-file-input"
+                                    class="form-label"
+                                    >Select File(s):</label
+                                >
+                                <input
+                                    class="form-control"
+                                    type="file"
+                                    id="ingest-file-input"
+                                    multiple
+                                />
+                                <small class="form-text text-muted"
+                                    >Select one or more files to ingest.</small
+                                >
+                            </div>
+                            <div class="mb-3">
+                                <label
+                                    for="ingest-file-collection"
+                                    class="form-label"
+                                    >Target Collection Name:</label
+                                >
+                                <input
+                                    type="text"
+                                    class="form-control"
+                                    id="ingest-file-collection"
+                                    placeholder="e.g., project_docs_alpha"
+                                    required
+                                />
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-arrow-circle-up"></i> Start
+                                File Ingestion
+                            </button>
+                        </form>
+                    </div>
+                    <div
+                        class="tab-pane fade"
+                        id="ingest-dir-pane"
+                        role="tabpanel"
+                        aria-labelledby="ingest-dir-tab"
+                    >
+                        <form id="form-ingest-dir">
+                            <div class="mb-3">
+                                <label
+                                    for="ingest-dir-zip-input"
+                                    class="form-label"
+                                    >Select Directory ZIP File:</label
+                                >
+                                <input
+                                    class="form-control"
+                                    type="file"
+                                    id="ingest-dir-zip-input"
+                                    accept=".zip"
+                                    required
+                                />
+                            </div>
+                            <div class="mb-3">
+                                <label
+                                    for="ingest-dir-collection"
+                                    class="form-label"
+                                    >Target Collection Name:</label
+                                >
+                                <input
+                                    type="text"
+                                    class="form-control"
+                                    id="ingest-dir-collection"
+                                    placeholder="e.g., my_codebase_snapshot"
+                                    required
+                                />
+                            </div>
+                            <div class="mb-3">
+                                <label
+                                    for="ingest-dir-repo-name"
+                                    class="form-label"
+                                    >Repository/Directory Identifier
+                                    (Optional):</label
+                                >
+                                <input
+                                    type="text"
+                                    class="form-control"
+                                    id="ingest-dir-repo-name"
+                                    placeholder="e.g., MyProjectV1"
+                                />
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-archive"></i> Start Directory
+                                Ingestion
+                            </button>
+                        </form>
+                    </div>
+                    <div
+                        class="tab-pane fade"
+                        id="ingest-git-pane"
+                        role="tabpanel"
+                        aria-labelledby="ingest-git-tab"
+                    >
+                        <form id="form-ingest-git">
+                            <div class="mb-3">
+                                <label for="ingest-git-url" class="form-label"
+                                    >Git Repository URL:</label
+                                >
+                                <input
+                                    type="url"
+                                    class="form-control"
+                                    id="ingest-git-url"
+                                    placeholder="https://github.com/user/repo.git"
+                                    required
+                                />
+                            </div>
+                            <div class="mb-3">
+                                <label
+                                    for="ingest-git-collection"
+                                    class="form-label"
+                                    >Target Collection Name:</label
+                                >
+                                <input
+                                    type="text"
+                                    class="form-control"
+                                    id="ingest-git-collection"
+                                    placeholder="e.g., open_source_project_main"
+                                    required
+                                />
+                            </div>
+                            <div class="mb-3">
+                                <label
+                                    for="ingest-git-repo-name"
+                                    class="form-label"
+                                    >Repository Identifier:</label
+                                >
+                                <input
+                                    type="text"
+                                    class="form-control"
+                                    id="ingest-git-repo-name"
+                                    placeholder="e.g., LLMCoreProject"
+                                    required
+                                />
+                            </div>
+                            <div class="mb-3">
+                                <label for="ingest-git-ref" class="form-label"
+                                    >Branch/Tag/Commit (Optional):</label
+                                >
+                                <input
+                                    type="text"
+                                    class="form-control"
+                                    id="ingest-git-ref"
+                                    placeholder="e.g., main, v1.0.2, abc1234 (defaults to HEAD)"
+                                />
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fab fa-git-square"></i> Start Git
+                                Ingestion
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                <hr />
+                <div id="ingestion-status-area" class="mt-3">
+                    <p class="small text-muted">
+                        Ingestion progress will appear here...
+                    </p>
+                    <div
+                        class="progress"
+                        style="height: 10px; display: none"
+                        id="ingestion-progress-container"
+                    >
+                        <div
+                            class="progress-bar progress-bar-striped progress-bar-animated"
+                            id="ingestion-progress-bar"
+                            role="progressbar"
+                            style="width: 0%"
+                            aria-valuenow="0"
+                            aria-valuemin="0"
+                            aria-valuemax="100"
+                        ></div>
+                    </div>
+                    <div id="ingestion-result-message" class="mt-2 small"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-bs-dismiss="modal"
+                >
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div
+    class="modal fade"
+    id="directRagSearchResultsModal"
+    tabindex="-1"
+    aria-labelledby="directRagSearchResultsModalLabel"
+    aria-hidden="true"
+>
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title" id="directRagSearchResultsModalLabel">
+                    <i class="fas fa-search-location"></i> Direct RAG Search
+                    Results
+                </h5>
+                <button
+                    type="button"
+                    class="btn-close btn-close-white"
+                    data-bs-dismiss="modal"
+                    aria-label="Close"
+                ></button>
+            </div>
+            <div class="modal-body" id="directRagSearchResultsBody">
+                <p class="text-muted">Search results will appear here...</p>
+            </div>
+            <div class="modal-footer">
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-bs-dismiss="modal"
+                >
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div
+    class="modal fade"
+    id="appLogsModal"
+    tabindex="-1"
+    aria-labelledby="appLogsModalLabel"
+    aria-hidden="true"
+>
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title" id="appLogsModalLabel">
+                    <i class="fas fa-align-left"></i> Application Logs
+                </h5>
+                <button
+                    type="button"
+                    class="btn-close btn-close-white"
+                    data-bs-dismiss="modal"
+                    aria-label="Close"
+                ></button>
+            </div>
+            <div class="modal-body">
+                <pre
+                    id="app-logs-display"
+                    style="
+                        max-height: 60vh;
+                        overflow-y: auto;
+                        font-size: 0.8rem;
+                        background-color: #212529;
+                        padding: 10px;
+                        border-radius: 5px;
+                    "
+                >
+Loading logs...</pre
+                >
+            </div>
+            <div class="modal-footer">
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-bs-dismiss="modal"
+                >
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- START: New Modal for Editing Preset Items -->
+<div
+    class="modal fade"
+    id="promptPresetItemModal"
+    tabindex="-1"
+    aria-labelledby="promptPresetItemModalLabel"
+    aria-hidden="true"
+>
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title" id="promptPresetItemModalLabel">
+                    Add/Edit Preset Item
+                </h5>
+                <button
+                    type="button"
+                    class="btn-close btn-close-white"
+                    data-bs-dismiss="modal"
+                    aria-label="Close"
+                ></button>
+            </div>
+            <div class="modal-body">
+                <form id="form-prompt-preset-item-editor">
+                    <input type="hidden" id="preset-item-editor-item-id" />
+                    <div class="mb-3">
+                        <label for="preset-item-type-select" class="form-label"
+                            >Item Type</label
+                        >
+                        <select
+                            class="form-select"
+                            id="preset-item-type-select"
+                        >
+                            <option value="preset_text_content" selected>
+                                Text Content
+                            </option>
+                            <option value="preset_file_reference">
+                                File Reference
+                            </option>
+                        </select>
+                    </div>
+                    <div id="preset-item-content-group" class="mb-3">
+                        <label
+                            for="preset-item-content-input"
+                            class="form-label"
+                            >Content</label
+                        >
+                        <textarea
+                            class="form-control"
+                            id="preset-item-content-input"
+                            rows="5"
+                        ></textarea>
+                    </div>
+                    <div
+                        id="preset-item-path-group"
+                        class="mb-3"
+                        style="display: none"
+                    >
+                        <label for="preset-item-path-input" class="form-label"
+                            >File Path</label
+                        >
+                        <input
+                            type="text"
+                            class="form-control"
+                            id="preset-item-path-input"
+                            placeholder="Enter server-side file path..."
+                        />
+                    </div>
+                    <div class="mb-3">
+                        <label
+                            for="preset-item-metadata-input"
+                            class="form-label"
+                            >Metadata (JSON, Optional)</label
+                        >
+                        <textarea
+                            class="form-control"
+                            id="preset-item-metadata-input"
+                            rows="2"
+                            placeholder='{"key": "value"}'
+                        ></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-bs-dismiss="modal"
+                >
+                    Cancel
+                </button>
+                <button
+                    type="button"
+                    class="btn btn-primary"
+                    id="btn-save-preset-item"
+                >
+                    Save Item
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- END: New Modal for Editing Preset Items -->
+
+<!-- START: New Modal for Prompt Shortcuts -->
+<div
+    class="modal fade"
+    id="promptShortcutsModal"
+    tabindex="-1"
+    aria-labelledby="promptShortcutsModalLabel"
+    aria-hidden="true"
+>
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title" id="promptShortcutsModalLabel">
+                    <i class="fas fa-star"></i> Prompt Shortcuts
+                </h5>
+                <button
+                    type="button"
+                    class="btn-close btn-close-white"
+                    data-bs-dismiss="modal"
+                    aria-label="Close"
+                ></button>
+            </div>
+            <div class="modal-body">
+                <input
+                    type="text"
+                    class="form-control form-control-sm mb-3"
+                    id="prompt-shortcut-modal-search"
+                    placeholder="Search all presets..."
+                />
+                <div id="prompt-shortcut-modal-list" class="list-group">
+                    <!-- All presets will be listed here by JS -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-bs-dismiss="modal"
+                >
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- END: New Modal for Prompt Shortcuts -->

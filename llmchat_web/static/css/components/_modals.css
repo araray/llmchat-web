@@ -1,0 +1,54 @@
+/* llmchat_web/static/css/components/_modals.css */
+/* Contains styles for all modals used in the application. */
+
+/* Ingestion Modal Styling */
+#ingestionModal .nav-tabs .nav-link {
+    background-color: var(--bg-element-hover);
+    color: var(--text-secondary);
+    border-bottom-color: var(--bg-tertiary);
+}
+#ingestionModal .nav-tabs .nav-link.active {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--border-primary) var(--border-primary) var(--bg-tertiary);
+}
+#ingestionModal .form-label {
+    font-size: 0.9rem;
+}
+#ingestionModal .form-control,
+#ingestionModal .form-select {
+    font-size: 0.9rem;
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+}
+#ingestionModal .form-control::placeholder {
+    color: var(--text-placeholder);
+}
+#ingestion-progress-bar {
+    height: 10px;
+}
+
+/* Direct RAG Search Results Modal */
+#directRagSearchResultsModal .modal-body {
+    font-size: 0.85rem;
+}
+#directRagSearchResultsModal .list-group-item {
+    background-color: var(--bg-element);
+    border-color: var(--border-primary);
+    color: var(--text-primary);
+    padding: 0.5rem 0.75rem;
+}
+#directRagSearchResultsModal .list-group-item strong {
+    color: var(--text-info);
+}
+#directRagSearchResultsModal pre {
+    background-color: var(--bg-input);
+    padding: 5px;
+    border-radius: 3px;
+    max-height: 80px;
+    overflow-y: auto;
+    font-size: 0.8em;
+    white-space: pre-wrap;
+    word-break: break-all;
+}

@@ -38,7 +38,7 @@ class LLMCoreAPIClient:
             base_url: Base URL of the llmcore API server
             timeout: Default timeout for HTTP requests
         """
-        self.base_url = base_url or os.getenv('LLMCORE_API_URL', 'http://localhost:8000')
+        self.base_url = base_url or os.getenv('LLMCORE_API_URL', 'http://127.0.0.1:8000')
         self.timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
 
@@ -111,6 +111,345 @@ class LLMCoreAPIClient:
             async for chunk in response.aiter_text():
                 if chunk:
                     yield chunk
+
+    # =================================================================================
+    # SECTION: Session Management Methods
+    # =================================================================================
+
+    async def list_sessions(self) -> List[Dict[str, Any]]:
+        """
+        List all available sessions from the llmcore API.
+
+        Returns:
+            List of session metadata dictionaries
+        """
+        client = await self._get_client()
+        response = await client.get("/api/v2/sessions")
+        response.raise_for_status()
+        return response.json()
+
+    async def create_session(self, initial_system_message: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Create a new session via the llmcore API.
+
+        Args:
+            initial_system_message: Optional system message to set for the new session
+
+        Returns:
+            Dictionary containing the new session data
+        """
+        client = await self._get_client()
+        payload = {}
+        if initial_system_message:
+            payload["system_message"] = initial_system_message
+
+        response = await client.post("/api/v2/sessions", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def get_session(self, session_id: str) -> Dict[str, Any]:
+        """
+        Get full details of a single session from the llmcore API.
+
+        Args:
+            session_id: The ID of the session to retrieve
+
+        Returns:
+            Dictionary containing the complete session data including messages
+        """
+        client = await self._get_client()
+        response = await client.get(f"/api/v2/sessions/{session_id}")
+        response.raise_for_status()
+        return response.json()
+
+    async def delete_session(self, session_id: str) -> None:
+        """
+        Delete a session via the llmcore API.
+
+        Args:
+            session_id: The ID of the session to delete
+        """
+        client = await self._get_client()
+        response = await client.delete(f"/api/v2/sessions/{session_id}")
+        response.raise_for_status()
+
+    async def rename_session(self, session_id: str, new_name: str) -> Dict[str, Any]:
+        """
+        Rename a session via the llmcore API.
+
+        Args:
+            session_id: The ID of the session to rename
+            new_name: The new name for the session
+
+        Returns:
+            Dictionary containing the updated session data
+        """
+        client = await self._get_client()
+        payload = {"new_name": new_name}
+        response = await client.post(f"/api/v2/sessions/{session_id}/rename", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    # =================================================================================
+    # SECTION: Workspace Management Methods
+    # =================================================================================
+
+    async def list_workspace_items(self, session_id: str) -> List[Dict[str, Any]]:
+        """
+        List all workspace items for a given session.
+
+        Args:
+            session_id: The ID of the session
+
+        Returns:
+            List of workspace item dictionaries
+        """
+        client = await self._get_client()
+        response = await client.get(f"/api/v2/sessions/{session_id}/workspace/items")
+        response.raise_for_status()
+        return response.json()
+
+    async def get_workspace_item(self, session_id: str, item_id: str) -> Dict[str, Any]:
+        """
+        Get a specific workspace item by its ID.
+
+        Args:
+            session_id: The ID of the session
+            item_id: The ID of the workspace item
+
+        Returns:
+            Dictionary containing the workspace item data
+        """
+        client = await self._get_client()
+        response = await client.get(f"/api/v2/sessions/{session_id}/workspace/items/{item_id}")
+        response.raise_for_status()
+        return response.json()
+
+    async def add_text_to_workspace(self, session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Add a text snippet as a new workspace item.
+
+        Args:
+            session_id: The ID of the session
+            payload: Request payload with content and optional item_id
+
+        Returns:
+            Dictionary containing the created workspace item data
+        """
+        client = await self._get_client()
+        response = await client.post(f"/api/v2/sessions/{session_id}/workspace/add_text", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def add_file_to_workspace(self, session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Add a server-side file as a new workspace item.
+
+        Args:
+            session_id: The ID of the session
+            payload: Request payload with file_path and optional item_id
+
+        Returns:
+            Dictionary containing the created workspace item data
+        """
+        client = await self._get_client()
+        response = await client.post(f"/api/v2/sessions/{session_id}/workspace/add_file", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def remove_workspace_item(self, session_id: str, item_id: str) -> None:
+        """
+        Remove a workspace item by its ID.
+
+        Args:
+            session_id: The ID of the session
+            item_id: The ID of the workspace item to remove
+        """
+        client = await self._get_client()
+        response = await client.delete(f"/api/v2/sessions/{session_id}/workspace/items/{item_id}")
+        response.raise_for_status()
+
+    async def add_message_to_workspace(self, session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Add content from a specific message to the workspace.
+
+        Args:
+            session_id: The ID of the session
+            payload: Request payload with message_id
+
+        Returns:
+            Dictionary containing the created workspace item data
+        """
+        client = await self._get_client()
+        response = await client.post(f"/api/v2/sessions/{session_id}/workspace/add_from_message", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def preview_context(self, session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Preview the full context that would be prepared for a chat interaction.
+
+        Args:
+            session_id: The ID of the session
+            payload: Request payload with preview specification
+
+        Returns:
+            Dictionary containing the context preparation details
+        """
+        client = await self._get_client()
+        response = await client.post(f"/api/v2/sessions/{session_id}/context/preview", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    # =================================================================================
+    # SECTION: Context Preset Management Methods
+    # =================================================================================
+
+    async def list_presets(self) -> List[Dict[str, Any]]:
+        """
+        List all available context presets from the llmcore API.
+
+        Returns:
+            List of preset metadata dictionaries
+        """
+        client = await self._get_client()
+        response = await client.get("/api/v2/presets")
+        response.raise_for_status()
+        return response.json()
+
+    async def get_preset(self, preset_name: str) -> Dict[str, Any]:
+        """
+        Get full details of a single context preset from the llmcore API.
+
+        Args:
+            preset_name: The name of the preset to retrieve
+
+        Returns:
+            Dictionary containing the complete preset data
+
+        Raises:
+            httpx.HTTPStatusError: If preset not found (404) or other HTTP errors
+        """
+        client = await self._get_client()
+        response = await client.get(f"/api/v2/presets/{preset_name}")
+        response.raise_for_status()
+        return response.json()
+
+    async def create_preset(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create a new context preset via the llmcore API.
+
+        Args:
+            payload: Preset data including name, description, and items
+
+        Returns:
+            Dictionary containing the created preset data
+        """
+        client = await self._get_client()
+        response = await client.post("/api/v2/presets", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def update_preset(self, preset_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Update an existing context preset via the llmcore API.
+
+        Args:
+            preset_name: The name of the preset to update
+            payload: Updated preset data
+
+        Returns:
+            Dictionary containing the updated preset data
+        """
+        client = await self._get_client()
+        response = await client.put(f"/api/v2/presets/{preset_name}", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def delete_preset(self, preset_name: str) -> None:
+        """
+        Delete a context preset via the llmcore API.
+
+        Args:
+            preset_name: The name of the preset to delete
+
+        Raises:
+            httpx.HTTPStatusError: If preset not found (404) or other HTTP errors
+        """
+        client = await self._get_client()
+        response = await client.delete(f"/api/v2/presets/{preset_name}")
+        response.raise_for_status()
+
+    async def rename_preset(self, old_name: str, new_name: str) -> Dict[str, Any]:
+        """
+        Rename a context preset via the llmcore API.
+
+        Args:
+            old_name: The current name of the preset
+            new_name: The new name for the preset
+
+        Returns:
+            Dictionary containing confirmation or updated preset data
+        """
+        client = await self._get_client()
+        payload = {"new_name": new_name}
+        response = await client.post(f"/api/v2/presets/{old_name}/rename", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    # =================================================================================
+    # SECTION: Memory Management Methods
+    # =================================================================================
+
+    async def search_semantic_memory(
+        self,
+        query: str,
+        collection_name: Optional[str] = None,
+        k: int = 3,
+        filter_metadata: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Perform a semantic search against the llmcore memory system.
+
+        Args:
+            query: The text query to search for
+            collection_name: Optional target collection name
+            k: Number of results to return (1-20)
+            filter_metadata: Optional metadata filter dictionary
+
+        Returns:
+            List of ContextDocument dictionaries containing search results
+
+        Raises:
+            httpx.HTTPStatusError: For various error conditions (400, 404, 500)
+        """
+        client = await self._get_client()
+
+        # Construct query parameters for the GET request
+        params = {
+            "query": query,
+            "k": k
+        }
+
+        if collection_name:
+            params["collection_name"] = collection_name
+
+        # Note: For complex metadata filters, the llmcore API may expect
+        # JSON-encoded string. For this implementation, we'll pass simple
+        # key-value pairs directly as query parameters.
+        if filter_metadata:
+            # For simple filters, add them directly to params
+            # For complex nested filters, this may need JSON encoding
+            for key, value in filter_metadata.items():
+                params[f"filter_{key}"] = value
+
+        response = await client.get("/api/v2/memory/semantic/search", params=params)
+        response.raise_for_status()
+        return response.json()
+
+    # =================================================================================
+    # SECTION: Existing Methods (Agent, Ingestion, etc.)
+    # =================================================================================
 
     async def run_agent(
         self,
@@ -255,22 +594,6 @@ class LLMCoreAPIClient:
                     except json.JSONDecodeError:
                         # Skip malformed JSON lines
                         continue
-
-    async def search_semantic_memory(
-        self,
-        query: str,
-        collection_name: Optional[str] = None,
-        k: int = 3
-    ) -> List[Dict[str, Any]]:
-        """Search the semantic memory (vector store)."""
-        client = await self._get_client()
-        params = {"query": query, "k": k}
-        if collection_name:
-            params["collection_name"] = collection_name
-
-        response = await client.get("/api/v2/memory/semantic/search", params=params)
-        response.raise_for_status()
-        return response.json()
 
     async def __aenter__(self):
         """Async context manager entry."""
