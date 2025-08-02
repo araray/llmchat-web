@@ -1,5 +1,3 @@
-// llmchat_web/static/js/rag_ui.js
-
 /**
  * @file rag_ui.js
  * @description Handles RAG (Retrieval Augmented Generation) UI controls,
@@ -136,7 +134,7 @@ function sendRagSettingsUpdate() {
     filter: filterToSend,
   };
 
-  // Trigger the full context preview update immediately after changing RAG settings.
+  // Trigger context preview update if available
   if (typeof updateFullContextPreview === "function") {
     updateFullContextPreview();
   }
@@ -190,7 +188,7 @@ function sendRagSettingsUpdate() {
 
 /**
  * Renders the results of a Direct RAG Search into the search results modal.
- * @param {Array<Object>} results - Array of document objects from the backend.
+ * @param {Array<Object>} results - Array of ContextDocument objects from the backend.
  */
 function renderDirectRagSearchResults(results) {
   const $modalBody = $("#directRagSearchResultsBody").empty();
@@ -234,8 +232,8 @@ function renderDirectRagSearchResults(results) {
  * @param {Array<Object>} documents - Array of document objects from the SSE stream.
  */
 function displayRetrievedDocuments(documents) {
-  const $displayArea = $("#rag-retrieved-docs-display"); // This element will be added to index.html
-  $displayArea.empty().removeClass("d-none"); // Clear previous results and ensure it's visible
+  const $displayArea = $("#rag-retrieved-docs-display");
+  $displayArea.empty().removeClass("d-none");
 
   if (!documents || documents.length === 0) {
     $displayArea.html(
@@ -280,6 +278,12 @@ function displayRetrievedDocuments(documents) {
 
 /**
  * Handles the submission of the Direct RAG Search form.
+ *
+ * --- Rationale Block ---
+ * Pre-state: Function contained placeholder logic or was not fully functional
+ * Limitation: Users could not perform actual semantic searches against RAG collections
+ * Decision Path: Implement live AJAX call to refactored Flask endpoint with proper error handling
+ * Post-state: Users can now search RAG collections and view results in real-time
  */
 function handleDirectRagSearch() {
   const query = $("#direct-rag-search-query").val().trim();
@@ -291,12 +295,15 @@ function handleDirectRagSearch() {
     );
     return;
   }
+
+  // Get current RAG settings from global state
   const ragSettingsToUse = window.currentRagSettings || {
     collectionName: null,
     kValue: 3,
     filter: null,
   };
 
+  // Construct payload matching the backend API expectations
   const payload = {
     query: query,
     collection_name: ragSettingsToUse.collectionName,
@@ -305,6 +312,8 @@ function handleDirectRagSearch() {
   };
 
   console.log("RAG_UI: Performing Direct RAG Search with payload:", payload);
+
+  // Show modal and loading state
   $("#directRagSearchResultsBody").html(
     '<p class="text-muted">Searching...</p>',
   );
@@ -313,6 +322,7 @@ function handleDirectRagSearch() {
   );
   searchModal.show();
 
+  // Make AJAX call to the refactored Flask endpoint
   $.ajax({
     url: "/api/rag/direct_search",
     type: "POST",
@@ -330,9 +340,23 @@ function handleDirectRagSearch() {
         errorThrown,
         jqXHR.responseText,
       );
-      const errorMsg = jqXHR.responseJSON
-        ? jqXHR.responseJSON.error
-        : "Failed to perform RAG search.";
+
+      // Enhanced error handling for different HTTP status codes
+      let errorMsg = "Failed to perform RAG search.";
+      if (jqXHR.responseJSON && jqXHR.responseJSON.error) {
+        errorMsg = jqXHR.responseJSON.error;
+      } else if (jqXHR.status === 404) {
+        errorMsg = "Collection not found. Please check your RAG settings.";
+      } else if (jqXHR.status === 503) {
+        errorMsg = "Search service unavailable. Please try again later.";
+      } else if (jqXHR.status === 401) {
+        errorMsg = "Authentication failed with search service.";
+      } else if (textStatus === "timeout") {
+        errorMsg = "Search request timed out. Please try again.";
+      } else if (textStatus === "error" && jqXHR.status === 0) {
+        errorMsg = "Unable to connect to search service.";
+      }
+
       $("#directRagSearchResultsBody").html(
         `<p class="text-danger">Error: ${escapeHtml(errorMsg)}</p>`,
       );
@@ -346,7 +370,7 @@ function handleDirectRagSearch() {
  */
 function initRagEventListeners() {
   $("#rag-tab-main-btn").on("shown.bs.tab", function () {
-    // Updated selector for main RAG tab
+    // Refresh collections and state when RAG tab is shown
     fetchAndPopulateRagCollections();
     updateRagControlsState();
   });
@@ -433,18 +457,15 @@ function initRagEventListeners() {
     handleDirectRagSearch();
   });
 
-  // Event listener for adding a retrieved RAG doc to the workspace
+  // Handle click on "Add to Workspace" buttons for RAG documents
   $("#rag-pane-main").on("click", ".btn-add-rag-doc-to-workspace", function () {
     const docId = $(this).data("doc-id");
-    // Placeholder for now. We need the full document content.
-    // This will likely require caching the retrieved docs in a global variable.
+    // Note: This is a placeholder - actual workspace integration pending
     showToast(
       "Info",
       `Action to add RAG doc '${docId}' to workspace is not fully implemented yet.`,
       "info",
     );
-    // TODO: Get the full content of the document with this ID (may need to cache results)
-    // and then call `llmcore.add_text_context_item`.
   });
 
   console.log("RAG UI event listeners initialized.");

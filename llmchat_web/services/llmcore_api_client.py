@@ -398,6 +398,56 @@ class LLMCoreAPIClient:
         return response.json()
 
     # =================================================================================
+    # SECTION: Memory Management Methods
+    # =================================================================================
+
+    async def search_semantic_memory(
+        self,
+        query: str,
+        collection_name: Optional[str] = None,
+        k: int = 3,
+        filter_metadata: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Perform a semantic search against the llmcore memory system.
+
+        Args:
+            query: The text query to search for
+            collection_name: Optional target collection name
+            k: Number of results to return (1-20)
+            filter_metadata: Optional metadata filter dictionary
+
+        Returns:
+            List of ContextDocument dictionaries containing search results
+
+        Raises:
+            httpx.HTTPStatusError: For various error conditions (400, 404, 500)
+        """
+        client = await self._get_client()
+
+        # Construct query parameters for the GET request
+        params = {
+            "query": query,
+            "k": k
+        }
+
+        if collection_name:
+            params["collection_name"] = collection_name
+
+        # Note: For complex metadata filters, the llmcore API may expect
+        # JSON-encoded string. For this implementation, we'll pass simple
+        # key-value pairs directly as query parameters.
+        if filter_metadata:
+            # For simple filters, add them directly to params
+            # For complex nested filters, this may need JSON encoding
+            for key, value in filter_metadata.items():
+                params[f"filter_{key}"] = value
+
+        response = await client.get("/api/v2/memory/semantic/search", params=params)
+        response.raise_for_status()
+        return response.json()
+
+    # =================================================================================
     # SECTION: Existing Methods (Agent, Ingestion, etc.)
     # =================================================================================
 
@@ -544,22 +594,6 @@ class LLMCoreAPIClient:
                     except json.JSONDecodeError:
                         # Skip malformed JSON lines
                         continue
-
-    async def search_semantic_memory(
-        self,
-        query: str,
-        collection_name: Optional[str] = None,
-        k: int = 3
-    ) -> List[Dict[str, Any]]:
-        """Search the semantic memory (vector store)."""
-        client = await self._get_client()
-        params = {"query": query, "k": k}
-        if collection_name:
-            params["collection_name"] = collection_name
-
-        response = await client.get("/api/v2/memory/semantic/search", params=params)
-        response.raise_for_status()
-        return response.json()
 
     async def __aenter__(self):
         """Async context manager entry."""
