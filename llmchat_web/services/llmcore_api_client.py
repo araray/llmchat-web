@@ -38,7 +38,7 @@ class LLMCoreAPIClient:
             base_url: Base URL of the llmcore API server
             timeout: Default timeout for HTTP requests
         """
-        self.base_url = base_url or os.getenv('LLMCORE_API_URL', 'http://localhost:8000')
+        self.base_url = base_url or os.getenv('LLMCORE_API_URL', 'http://127.0.0.1:8000')
         self.timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
 
@@ -187,6 +187,117 @@ class LLMCoreAPIClient:
         client = await self._get_client()
         payload = {"new_name": new_name}
         response = await client.post(f"/api/v2/sessions/{session_id}/rename", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    # =================================================================================
+    # SECTION: Workspace Management Methods
+    # =================================================================================
+
+    async def list_workspace_items(self, session_id: str) -> List[Dict[str, Any]]:
+        """
+        List all workspace items for a given session.
+
+        Args:
+            session_id: The ID of the session
+
+        Returns:
+            List of workspace item dictionaries
+        """
+        client = await self._get_client()
+        response = await client.get(f"/api/v2/sessions/{session_id}/workspace/items")
+        response.raise_for_status()
+        return response.json()
+
+    async def get_workspace_item(self, session_id: str, item_id: str) -> Dict[str, Any]:
+        """
+        Get a specific workspace item by its ID.
+
+        Args:
+            session_id: The ID of the session
+            item_id: The ID of the workspace item
+
+        Returns:
+            Dictionary containing the workspace item data
+        """
+        client = await self._get_client()
+        response = await client.get(f"/api/v2/sessions/{session_id}/workspace/items/{item_id}")
+        response.raise_for_status()
+        return response.json()
+
+    async def add_text_to_workspace(self, session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Add a text snippet as a new workspace item.
+
+        Args:
+            session_id: The ID of the session
+            payload: Request payload with content and optional item_id
+
+        Returns:
+            Dictionary containing the created workspace item data
+        """
+        client = await self._get_client()
+        response = await client.post(f"/api/v2/sessions/{session_id}/workspace/add_text", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def add_file_to_workspace(self, session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Add a server-side file as a new workspace item.
+
+        Args:
+            session_id: The ID of the session
+            payload: Request payload with file_path and optional item_id
+
+        Returns:
+            Dictionary containing the created workspace item data
+        """
+        client = await self._get_client()
+        response = await client.post(f"/api/v2/sessions/{session_id}/workspace/add_file", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def remove_workspace_item(self, session_id: str, item_id: str) -> None:
+        """
+        Remove a workspace item by its ID.
+
+        Args:
+            session_id: The ID of the session
+            item_id: The ID of the workspace item to remove
+        """
+        client = await self._get_client()
+        response = await client.delete(f"/api/v2/sessions/{session_id}/workspace/items/{item_id}")
+        response.raise_for_status()
+
+    async def add_message_to_workspace(self, session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Add content from a specific message to the workspace.
+
+        Args:
+            session_id: The ID of the session
+            payload: Request payload with message_id
+
+        Returns:
+            Dictionary containing the created workspace item data
+        """
+        client = await self._get_client()
+        response = await client.post(f"/api/v2/sessions/{session_id}/workspace/add_from_message", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def preview_context(self, session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Preview the full context that would be prepared for a chat interaction.
+
+        Args:
+            session_id: The ID of the session
+            payload: Request payload with preview specification
+
+        Returns:
+            Dictionary containing the context preparation details
+        """
+        client = await self._get_client()
+        response = await client.post(f"/api/v2/sessions/{session_id}/context/preview", json=payload)
         response.raise_for_status()
         return response.json()
 
