@@ -191,6 +191,102 @@ class LLMCoreAPIClient:
         return response.json()
 
     # =================================================================================
+    # SECTION: Context Preset Management Methods
+    # =================================================================================
+
+    async def list_presets(self) -> List[Dict[str, Any]]:
+        """
+        List all available context presets from the llmcore API.
+
+        Returns:
+            List of preset metadata dictionaries
+        """
+        client = await self._get_client()
+        response = await client.get("/api/v2/presets")
+        response.raise_for_status()
+        return response.json()
+
+    async def get_preset(self, preset_name: str) -> Dict[str, Any]:
+        """
+        Get full details of a single context preset from the llmcore API.
+
+        Args:
+            preset_name: The name of the preset to retrieve
+
+        Returns:
+            Dictionary containing the complete preset data
+
+        Raises:
+            httpx.HTTPStatusError: If preset not found (404) or other HTTP errors
+        """
+        client = await self._get_client()
+        response = await client.get(f"/api/v2/presets/{preset_name}")
+        response.raise_for_status()
+        return response.json()
+
+    async def create_preset(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create a new context preset via the llmcore API.
+
+        Args:
+            payload: Preset data including name, description, and items
+
+        Returns:
+            Dictionary containing the created preset data
+        """
+        client = await self._get_client()
+        response = await client.post("/api/v2/presets", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def update_preset(self, preset_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Update an existing context preset via the llmcore API.
+
+        Args:
+            preset_name: The name of the preset to update
+            payload: Updated preset data
+
+        Returns:
+            Dictionary containing the updated preset data
+        """
+        client = await self._get_client()
+        response = await client.put(f"/api/v2/presets/{preset_name}", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def delete_preset(self, preset_name: str) -> None:
+        """
+        Delete a context preset via the llmcore API.
+
+        Args:
+            preset_name: The name of the preset to delete
+
+        Raises:
+            httpx.HTTPStatusError: If preset not found (404) or other HTTP errors
+        """
+        client = await self._get_client()
+        response = await client.delete(f"/api/v2/presets/{preset_name}")
+        response.raise_for_status()
+
+    async def rename_preset(self, old_name: str, new_name: str) -> Dict[str, Any]:
+        """
+        Rename a context preset via the llmcore API.
+
+        Args:
+            old_name: The current name of the preset
+            new_name: The new name for the preset
+
+        Returns:
+            Dictionary containing confirmation or updated preset data
+        """
+        client = await self._get_client()
+        payload = {"new_name": new_name}
+        response = await client.post(f"/api/v2/presets/{old_name}/rename", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    # =================================================================================
     # SECTION: Existing Methods (Agent, Ingestion, etc.)
     # =================================================================================
 

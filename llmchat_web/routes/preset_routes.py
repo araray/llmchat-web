@@ -3,23 +3,23 @@
 Flask routes for managing Context Presets (also referred to as Prompt Presets).
 
 This module provides a RESTful API for CRUD (Create, Read, Update, Delete)
-operations on context presets, leveraging the underlying functionality of the
-LLMCore library. These presets allow users to save, load, and manage reusable
-collections of context items for their chat sessions.
+operations on context presets, leveraging the llmcore API service through
+the LLMCoreAPIClient. These presets allow users to save, load, and manage
+reusable collections of context items for their chat sessions.
+
+UPDATED: Refactored to use LLMCoreAPIClient instead of direct llmcore library
+imports, enabling complete architectural decoupling as specified in the
+service-oriented architecture transition.
 """
 
 import logging
 from typing import Any, Dict
 
+import httpx
 from flask import jsonify, request
 
-from llmcore import (ContextPresetItem, LLMCoreError, StorageError)
-from llmcore.models import ContextItemType
-
-# Rationale: The direct import of 'llmcore_instance' is removed from the top
-# level to break a circular dependency with the main 'app.py' module.
-# It will be imported locally within each route function that needs it.
 from ..app import async_to_sync_in_flask, logger as app_logger
+from ..services.llmcore_api_client import get_api_client
 from . import preset_bp
 
 # Configure a local logger for this specific routes module
@@ -42,20 +42,20 @@ async def list_presets_route() -> Any:
         JSON response with a list of preset metadata (name, description, etc.),
         or an error message.
     """
-    # FIX: Import locally to prevent circular dependency on startup.
-    from ..app import llmcore_instance
+    api_client = get_api_client()
 
-    if not llmcore_instance:
-        logger.error(
-            "Attempted to list presets, but LLM service is not available."
-        )
-        return jsonify({"error": "LLM service not available."}), 503
     try:
-        presets_meta = await llmcore_instance.list_context_presets()
-        logger.info(f"Successfully listed {len(presets_meta)} context presets.")
+        presets_meta = await api_client.list_presets()
+        logger.info(f"Successfully listed {len(presets_meta)} context presets via API.")
         return jsonify(presets_meta)
-    except (StorageError, LLMCoreError) as e:
-        logger.error(f"Error listing context presets: {e}", exc_info=True)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 503:
+            logger.error("LLM service unavailable for listing presets.")
+            return jsonify({"error": "LLM service not available."}), 503
+        logger.error(f"HTTP error listing context presets: {e}", exc_info=True)
+        return jsonify({"error": f"Failed to list presets: {str(e)}"}), 500
+    except Exception as e:
+        logger.error(f"Unexpected error listing context presets: {e}", exc_info=True)
         return jsonify({"error": f"Failed to list presets: {str(e)}"}), 500
 
 
@@ -67,19 +67,12 @@ async def create_preset_route() -> Any:
 
     Expects a JSON payload with "name", "description", and "items".
     Each item in the "items" list should be a dictionary corresponding to
-    the ContextPresetItem model.
+    the ContextPresetItem model structure.
 
     Returns:
         JSON response with the data of the created preset or an error message.
     """
-    # FIX: Import locally to prevent circular dependency on startup.
-    from ..app import llmcore_instance
-
-    if not llmcore_instance:
-        logger.error(
-            "Attempted to create a preset, but LLM service is not available."
-        )
-        return jsonify({"error": "LLM service not available."}), 503
+    api_client = get_api_client()
 
     data = request.json
     if not data or "name" not in data or "items" not in data:
@@ -88,19 +81,20 @@ async def create_preset_route() -> Any:
         }), 400
 
     try:
-        preset_items = [ContextPresetItem(**item) for item in data["items"]]
-        new_preset = await llmcore_instance.save_context_preset(
-            preset_name=data["name"],
-            description=data.get("description"),
-            items=preset_items,
-            metadata=data.get("metadata"),
-        )
-        logger.info(f"Successfully created context preset '{new_preset.name}'.")
-        return jsonify(new_preset.model_dump(mode="json")), 201
-    except (StorageError, LLMCoreError, ValueError) as e:
-        logger.error(
-            f"Error creating context preset '{data.get('name')}': {e}",
-            exc_info=True)
+        new_preset = await api_client.create_preset(payload=data)
+        logger.info(f"Successfully created context preset '{data['name']}' via API.")
+        return jsonify(new_preset), 201
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 503:
+            logger.error("LLM service unavailable for creating preset.")
+            return jsonify({"error": "LLM service not available."}), 503
+        elif e.response.status_code == 400:
+            logger.warning(f"Bad request creating preset '{data.get('name')}': {e}")
+            return jsonify({"error": f"Invalid preset data: {str(e)}"}), 400
+        logger.error(f"HTTP error creating context preset '{data.get('name')}': {e}", exc_info=True)
+        return jsonify({"error": f"Failed to create preset: {str(e)}"}), 500
+    except Exception as e:
+        logger.error(f"Unexpected error creating context preset '{data.get('name')}': {e}", exc_info=True)
         return jsonify({"error": f"Failed to create preset: {str(e)}"}), 500
 
 
@@ -116,25 +110,23 @@ async def get_preset_route(preset_name: str) -> Any:
     Returns:
         JSON response with the full preset data or a 404 error if not found.
     """
-    # FIX: Import locally to prevent circular dependency on startup.
-    from ..app import llmcore_instance
+    api_client = get_api_client()
 
-    if not llmcore_instance:
-        logger.error(
-            f"Attempted to get preset '{preset_name}', but LLM service is not available."
-        )
-        return jsonify({"error": "LLM service not available."}), 503
     try:
-        preset = await llmcore_instance.load_context_preset(preset_name)
-        if preset:
-            logger.info(f"Successfully loaded context preset '{preset_name}'.")
-            return jsonify(preset.model_dump(mode="json"))
-        else:
+        preset = await api_client.get_preset(preset_name)
+        logger.info(f"Successfully loaded context preset '{preset_name}' via API.")
+        return jsonify(preset)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
             logger.warning(f"Context preset '{preset_name}' not found.")
             return jsonify({"error": "Preset not found."}), 404
-    except (StorageError, LLMCoreError) as e:
-        logger.error(
-            f"Error loading context preset '{preset_name}': {e}", exc_info=True)
+        elif e.response.status_code == 503:
+            logger.error("LLM service unavailable for getting preset.")
+            return jsonify({"error": "LLM service not available."}), 503
+        logger.error(f"HTTP error loading context preset '{preset_name}': {e}", exc_info=True)
+        return jsonify({"error": f"Failed to load preset: {str(e)}"}), 500
+    except Exception as e:
+        logger.error(f"Unexpected error loading context preset '{preset_name}': {e}", exc_info=True)
         return jsonify({"error": f"Failed to load preset: {str(e)}"}), 500
 
 
@@ -154,14 +146,7 @@ async def update_preset_route(preset_name: str) -> Any:
     Returns:
         JSON response with the updated preset data or an error message.
     """
-    # FIX: Import locally to prevent circular dependency on startup.
-    from ..app import llmcore_instance
-
-    if not llmcore_instance:
-        logger.error(
-            f"Attempted to update preset '{preset_name}', but LLM service is not available."
-        )
-        return jsonify({"error": "LLM service not available."}), 503
+    api_client = get_api_client()
 
     data = request.json
     if (not data or "name" not in data or "items" not in data or
@@ -172,19 +157,23 @@ async def update_preset_route(preset_name: str) -> Any:
         }), 400
 
     try:
-        preset_items = [ContextPresetItem(**item) for item in data["items"]]
-        updated_preset = await llmcore_instance.save_context_preset(
-            preset_name=data["name"],
-            description=data.get("description"),
-            items=preset_items,
-            metadata=data.get("metadata"),
-        )
-        logger.info(f"Successfully updated context preset '{preset_name}'.")
-        return jsonify(updated_preset.model_dump(mode="json"))
-    except (StorageError, LLMCoreError, ValueError) as e:
-        logger.error(
-            f"Error updating context preset '{preset_name}': {e}",
-            exc_info=True)
+        updated_preset = await api_client.update_preset(preset_name, payload=data)
+        logger.info(f"Successfully updated context preset '{preset_name}' via API.")
+        return jsonify(updated_preset)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            logger.warning(f"Context preset '{preset_name}' not found for update.")
+            return jsonify({"error": "Preset not found."}), 404
+        elif e.response.status_code == 503:
+            logger.error("LLM service unavailable for updating preset.")
+            return jsonify({"error": "LLM service not available."}), 503
+        elif e.response.status_code == 400:
+            logger.warning(f"Bad request updating preset '{preset_name}': {e}")
+            return jsonify({"error": f"Invalid preset data: {str(e)}"}), 400
+        logger.error(f"HTTP error updating context preset '{preset_name}': {e}", exc_info=True)
+        return jsonify({"error": f"Failed to update preset: {str(e)}"}), 500
+    except Exception as e:
+        logger.error(f"Unexpected error updating context preset '{preset_name}': {e}", exc_info=True)
         return jsonify({"error": f"Failed to update preset: {str(e)}"}), 500
 
 
@@ -200,27 +189,25 @@ async def delete_preset_route(preset_name: str) -> Any:
     Returns:
         JSON response confirming deletion or an error message.
     """
-    # FIX: Import locally to prevent circular dependency on startup.
-    from ..app import llmcore_instance
+    api_client = get_api_client()
 
-    if not llmcore_instance:
-        logger.error(
-            f"Attempted to delete preset '{preset_name}', but LLM service is not available."
-        )
-        return jsonify({"error": "LLM service not available."}), 503
     try:
-        deleted = await llmcore_instance.delete_context_preset(preset_name)
-        if deleted:
-            logger.info(f"Successfully deleted context preset '{preset_name}'.")
-            return jsonify({
-                "message": f"Preset '{preset_name}' deleted successfully."
-            })
-        else:
+        await api_client.delete_preset(preset_name)
+        logger.info(f"Successfully deleted context preset '{preset_name}' via API.")
+        return jsonify({
+            "message": f"Preset '{preset_name}' deleted successfully."
+        })
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
             logger.warning(f"Context preset '{preset_name}' not found for deletion.")
             return jsonify({"error": "Preset not found."}), 404
-    except (StorageError, LLMCoreError) as e:
-        logger.error(
-            f"Error deleting context preset '{preset_name}': {e}", exc_info=True)
+        elif e.response.status_code == 503:
+            logger.error("LLM service unavailable for deleting preset.")
+            return jsonify({"error": "LLM service not available."}), 503
+        logger.error(f"HTTP error deleting context preset '{preset_name}': {e}", exc_info=True)
+        return jsonify({"error": f"Failed to delete preset: {str(e)}"}), 500
+    except Exception as e:
+        logger.error(f"Unexpected error deleting context preset '{preset_name}': {e}", exc_info=True)
         return jsonify({"error": f"Failed to delete preset: {str(e)}"}), 500
 
 
@@ -239,14 +226,7 @@ async def rename_preset_route(old_name: str) -> Any:
     Returns:
         JSON response confirming the rename or an error message.
     """
-    # FIX: Import locally to prevent circular dependency on startup.
-    from ..app import llmcore_instance
-
-    if not llmcore_instance:
-        logger.error(
-            f"Attempted to rename preset '{old_name}', but LLM service is not available."
-        )
-        return jsonify({"error": "LLM service not available."}), 503
+    api_client = get_api_client()
 
     data = request.json
     if not data or "new_name" not in data or not data["new_name"].strip():
@@ -256,24 +236,28 @@ async def rename_preset_route(old_name: str) -> Any:
 
     new_name = data["new_name"].strip()
     try:
-        success = await llmcore_instance.rename_context_preset(old_name, new_name)
-        if success:
-            logger.info(f"Successfully renamed preset '{old_name}' to '{new_name}'.")
-            return jsonify({
-                "message":
-                f"Preset '{old_name}' renamed to '{new_name}' successfully."
-            })
-        else:
-            logger.warning(f"Failed to rename preset '{old_name}'. It might not exist or the new name might be taken.")
+        result = await api_client.rename_preset(old_name, new_name)
+        logger.info(f"Successfully renamed preset '{old_name}' to '{new_name}' via API.")
+        # Return the result from the API, which should contain a success message
+        return jsonify(result)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            logger.warning(f"Failed to rename preset '{old_name}'. It might not exist.")
             return jsonify({
                 "error":
                 f"Failed to rename preset '{old_name}'. The preset may not exist, or the new name '{new_name}' may already be in use."
             }), 404
-    except (StorageError, LLMCoreError, ValueError) as e:
-        logger.error(
-            f"Error renaming preset '{old_name}' to '{new_name}': {e}",
-            exc_info=True)
+        elif e.response.status_code == 503:
+            logger.error("LLM service unavailable for renaming preset.")
+            return jsonify({"error": "LLM service not available."}), 503
+        elif e.response.status_code == 400:
+            logger.warning(f"Bad request renaming preset '{old_name}' to '{new_name}': {e}")
+            return jsonify({"error": f"Invalid rename request: {str(e)}"}), 400
+        logger.error(f"HTTP error renaming preset '{old_name}' to '{new_name}': {e}", exc_info=True)
+        return jsonify({"error": f"Failed to rename preset: {str(e)}"}), 500
+    except Exception as e:
+        logger.error(f"Unexpected error renaming preset '{old_name}' to '{new_name}': {e}", exc_info=True)
         return jsonify({"error": f"Failed to rename preset: {str(e)}"}), 500
 
 
-logger.info("Context Preset routes defined on preset_bp.")
+logger.info("Context Preset routes defined on preset_bp (API-driven implementation).")
