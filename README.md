@@ -1,3 +1,5 @@
+I'm working on a much better version of this under the name Noosphera. For this reason this project is being archived.
+
 # LLMChat-Web: Web Interface for LLMCore
 
 **LLMChat-Web** is a Flask-based web application providing a user-friendly graphical interface to interact with Large Language Models (LLMs) through the powerful **LLMCore** library. It allows users to engage in chat sessions, manage conversation history, utilize Retrieval Augmented Generation (RAG) with ingested data, and configure LLM settings, all from a web browser.
